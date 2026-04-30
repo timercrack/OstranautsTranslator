@@ -1,0 +1,77 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <LangVersion>latest</LangVersion>
+        <AssemblyName>OstranautsTranslator</AssemblyName>
+        <RootNamespace>OstranautsTranslator.Tool</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\OstranautsTranslator.Core\OstranautsTranslator.Core.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="8.0.0" />
+        <PackageReference Include="Mono.Cecil" Version="0.11.6" />
+        <PackageReference Include="SQLitePCLRaw.provider.winsqlite3" Version="2.1.6" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="..\..\config-example.ini"
+            Link="config-example.ini"
+            CopyToOutputDirectory="PreserveNewest" />
+        <None Include="..\..\config.ini"
+            Link="config.ini"
+            CopyToOutputDirectory="PreserveNewest"
+            Condition="Exists('..\..\config.ini')" />
+        <None Include="..\..\tmp\generate_generic_glossary.py"
+            Link="generate_generic_glossary.py"
+            CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <Target Name="CopyTranslatorPackageToGameRoot" AfterTargets="Build"
+        Condition="('$(GameRootPath)' != '' or '$(CopyToBepInExPath)' != '') and '$(DesignTimeBuild)' != 'true'">
+        <PropertyGroup>
+            <EffectiveGameRootPath Condition="'$(GameRootPath)' != ''">$(GameRootPath)</EffectiveGameRootPath>
+            <NormalizedTarget Condition="'$(EffectiveGameRootPath)' == ''">
+                $(CopyToBepInExPath.TrimEnd('\'))</NormalizedTarget>
+            <EffectiveGameRootPath Condition="'$(EffectiveGameRootPath)' == ''">
+                $([System.IO.Path]::GetFullPath('$(NormalizedTarget)\..'))</EffectiveGameRootPath>
+            <TranslatorToolPath>$(EffectiveGameRootPath)\OstranautsTranslator</TranslatorToolPath>
+            <TranslatorWorkspacePath>$(TranslatorToolPath)\workspace</TranslatorWorkspacePath>
+        </PropertyGroup>
+        <RemoveDir Directories="$(TargetDir)runtimes" Condition="Exists('$(TargetDir)runtimes')" />
+        <Delete Files="$(TargetDir)SQLitePCLRaw.batteries_v2.dll"
+            Condition="Exists('$(TargetDir)SQLitePCLRaw.batteries_v2.dll')" />
+        <Delete Files="$(TargetDir)SQLitePCLRaw.provider.e_sqlite3.dll"
+            Condition="Exists('$(TargetDir)SQLitePCLRaw.provider.e_sqlite3.dll')" />
+        <MakeDir Directories="$(TranslatorToolPath)" />
+        <RemoveDir Directories="$(TranslatorWorkspacePath)\translations"
+            Condition="Exists('$(TranslatorWorkspacePath)\translations')" />
+        <RemoveDir Directories="$(TranslatorToolPath)\runtimes"
+            Condition="Exists('$(TranslatorToolPath)\runtimes')" />
+        <ItemGroup>
+            <_TranslatorOutputs Include="$(TargetDir)**\*"
+                Exclude="$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml" />
+            <_StaleToolOutputs
+                Include="$(TranslatorToolPath)\Ostranauts.RuntimeTranslation.Core.dll" />
+            <_StaleToolOutputs
+                Include="$(TranslatorToolPath)\XUnity.AutoTranslator.Plugin.ExtProtocol.dll" />
+            <_StaleToolOutputs
+                Include="$(TranslatorToolPath)\XUnity.AutoTranslator.TextProcessing.dll" />
+            <_StaleToolOutputs
+                Include="$(TranslatorToolPath)\.env" />
+            <_StaleToolOutputs
+                Include="$(TranslatorToolPath)\SQLitePCLRaw.batteries_v2.dll" />
+            <_StaleToolOutputs
+                Include="$(TranslatorToolPath)\SQLitePCLRaw.provider.e_sqlite3.dll" />
+        </ItemGroup>
+        <Copy SourceFiles="@(_TranslatorOutputs)"
+            DestinationFolder="$(TranslatorToolPath)"
+            SkipUnchangedFiles="true" />
+        <Delete Files="@(_StaleToolOutputs)" TreatErrorsAsWarnings="true" />
+    </Target>
+</Project>

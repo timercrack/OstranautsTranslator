@@ -1,0 +1,51 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "0Harmony", "src\0Harmony\0Harmony.csproj", "{0C3B9A4B-0F2F-4F20-B68A-377B82A831D1}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "BepInEx", "src\BepInEx\BepInEx.csproj", "{5D7A3A9C-2B47-4BE3-86EC-2A6A4D8B91BB}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "UnityEngine", "src\UnityEngine\UnityEngine.csproj", "{C92A58C4-572A-4FE5-9A8E-B9B8F0E5D1D5}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "OstranautsTranslator.Core", "src\OstranautsTranslator.Core\OstranautsTranslator.Core.csproj", "{2CE641F0-3E36-44B6-8E75-ACD6FE7A4680}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "OstranautsTranslator.Plugin.BepInEx", "src\OstranautsTranslator.Plugin.BepInEx\OstranautsTranslator.Plugin.BepInEx.csproj", "{E8B531CB-7B4D-44BD-9DAD-E58B6A9F7619}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "OstranautsTranslator.Tool", "src\OstranautsTranslator.Tool\OstranautsTranslator.Tool.csproj", "{8351E8B6-6F23-47F3-9E70-4CC9A14F8148}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{0C3B9A4B-0F2F-4F20-B68A-377B82A831D1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0C3B9A4B-0F2F-4F20-B68A-377B82A831D1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0C3B9A4B-0F2F-4F20-B68A-377B82A831D1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0C3B9A4B-0F2F-4F20-B68A-377B82A831D1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5D7A3A9C-2B47-4BE3-86EC-2A6A4D8B91BB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5D7A3A9C-2B47-4BE3-86EC-2A6A4D8B91BB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5D7A3A9C-2B47-4BE3-86EC-2A6A4D8B91BB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5D7A3A9C-2B47-4BE3-86EC-2A6A4D8B91BB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C92A58C4-572A-4FE5-9A8E-B9B8F0E5D1D5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C92A58C4-572A-4FE5-9A8E-B9B8F0E5D1D5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C92A58C4-572A-4FE5-9A8E-B9B8F0E5D1D5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C92A58C4-572A-4FE5-9A8E-B9B8F0E5D1D5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2CE641F0-3E36-44B6-8E75-ACD6FE7A4680}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2CE641F0-3E36-44B6-8E75-ACD6FE7A4680}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2CE641F0-3E36-44B6-8E75-ACD6FE7A4680}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2CE641F0-3E36-44B6-8E75-ACD6FE7A4680}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E8B531CB-7B4D-44BD-9DAD-E58B6A9F7619}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E8B531CB-7B4D-44BD-9DAD-E58B6A9F7619}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E8B531CB-7B4D-44BD-9DAD-E58B6A9F7619}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E8B531CB-7B4D-44BD-9DAD-E58B6A9F7619}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8351E8B6-6F23-47F3-9E70-4CC9A14F8148}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8351E8B6-6F23-47F3-9E70-4CC9A14F8148}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8351E8B6-6F23-47F3-9E70-4CC9A14F8148}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8351E8B6-6F23-47F3-9E70-4CC9A14F8148}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

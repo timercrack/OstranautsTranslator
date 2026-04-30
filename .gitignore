@@ -1,0 +1,13 @@
+bin/
+obj/
+.vs/
+.idea/
+config.ini
+*.user
+*.suo
+*.cache
+Directory.Build.props.user
+artifacts/
+.github/
+.vscode/
+tmp/generated-charsets/

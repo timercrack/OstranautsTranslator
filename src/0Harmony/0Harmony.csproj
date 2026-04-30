@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <AssemblyName>0Harmony</AssemblyName>
+        <RootNamespace>HarmonyLib</RootNamespace>
+        <AssemblyVersion>0.0.0.0</AssemblyVersion>
+        <WarningLevel>0</WarningLevel>
+        <Optimize>false</Optimize>
+    </PropertyGroup>
+</Project>

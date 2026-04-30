@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <RootNamespace>OstranautsTranslator.Plugin.BepInEx</RootNamespace>
+        <AssemblyName>OstranautsTranslator</AssemblyName>
+        <NoWarn>$(NoWarn);1591</NoWarn>
+        <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\0Harmony\0Harmony.csproj" />
+        <ProjectReference Include="..\BepInEx\BepInEx.csproj" />
+        <ProjectReference Include="..\UnityEngine\UnityEngine.csproj" />
+        <ProjectReference Include="..\OstranautsTranslator.Core\OstranautsTranslator.Core.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="8.0.0" />
+        <PackageReference Include="SQLitePCLRaw.provider.winsqlite3" Version="2.1.6" />
+    </ItemGroup>
+
+    <Target Name="CopyPluginPackageToBepInEx" AfterTargets="Build"
+        Condition="'$(CopyToBepInExPath)' != '' and '$(DesignTimeBuild)' != 'true'">
+        <PropertyGroup>
+            <PluginDir>$(CopyToBepInExPath.TrimEnd('\'))\plugins\OstranautsTranslator</PluginDir>
+        </PropertyGroup>
+        <MakeDir Directories="$(PluginDir)" />
+        <ItemGroup>
+            <_PluginOutputs Include="$(TargetDir)$(TargetName)$(TargetExt)" />
+            <_PluginOutputs Include="$(TargetDir)OstranautsTranslator.Core.dll" />
+            <_PluginOutputs Include="$(TargetDir)Microsoft.Data.Sqlite.dll"
+                Condition="Exists('$(TargetDir)Microsoft.Data.Sqlite.dll')" />
+            <_PluginOutputs Include="$(TargetDir)SQLitePCLRaw.core.dll"
+                Condition="Exists('$(TargetDir)SQLitePCLRaw.core.dll')" />
+            <_PluginOutputs Include="$(TargetDir)SQLitePCLRaw.provider.winsqlite3.dll"
+                Condition="Exists('$(TargetDir)SQLitePCLRaw.provider.winsqlite3.dll')" />
+            <_PluginOutputs Include="$(MSBuildProjectDirectory)\..\..\notosans"
+                Condition="Exists('$(MSBuildProjectDirectory)\..\..\notosans')" />
+        </ItemGroup>
+        <Copy SourceFiles="@(_PluginOutputs)" DestinationFolder="$(PluginDir)"
+            SkipUnchangedFiles="true" />
+    </Target>
+</Project>

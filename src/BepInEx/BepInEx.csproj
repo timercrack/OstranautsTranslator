@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <AssemblyName>BepInEx</AssemblyName>
+        <RootNamespace>BepInEx</RootNamespace>
+        <Version>5.4.23.5</Version>
+        <AssemblyVersion>5.4.23.5</AssemblyVersion>
+        <FileVersion>5.4.23.5</FileVersion>
+        <WarningLevel>0</WarningLevel>
+        <Optimize>false</Optimize>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\UnityEngine\UnityEngine.csproj" />
+    </ItemGroup>
+</Project>

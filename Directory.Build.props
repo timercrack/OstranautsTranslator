@@ -1,0 +1,24 @@
+<Project>
+    <PropertyGroup>
+        <Version>1.0.0</Version>
+        <Authors>timercrack</Authors>
+        <Company>OstranautsTranslator</Company>
+        <LangVersion>latest</LangVersion>
+        <Nullable>disable</Nullable>
+        <Deterministic>true</Deterministic>
+        <SolutionDir Condition="'$(SolutionDir)' == ''">
+            $([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)'))
+        </SolutionDir>
+        <GameRootPath Condition="'$(GameRootPath)' == ''">
+            G:\SteamLibrary\steamapps\common\Ostranauts</GameRootPath>
+        <ManagedPath Condition="'$(ManagedPath)' == '' and '$(GameRootPath)' != ''">
+            $(GameRootPath)\Ostranauts_Data\Managed</ManagedPath>
+        <BepInExCorePath Condition="'$(BepInExCorePath)' == '' and '$(GameRootPath)' != ''">
+            $(GameRootPath)\BepInEx\core</BepInExCorePath>
+        <CopyToBepInExPath Condition="'$(CopyToBepInExPath)' == '' and '$(GameRootPath)' != ''">
+            $(GameRootPath)\BepInEx</CopyToBepInExPath>
+    </PropertyGroup>
+
+    <Import Project="Directory.Build.props.user"
+        Condition="Exists('$(MSBuildThisFileDirectory)Directory.Build.props.user')" />
+</Project>
