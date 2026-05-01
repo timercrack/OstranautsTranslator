@@ -93,7 +93,6 @@ Notes:
 
 - `BatchSize`, `Temperature`, `MaxTokens`, and model/endpoint values live under `[LLMTranslate]`
 - `SystemPrompt` must be configured separately in `[TranslateGlossary]` and `[TranslateLlm]`
-- `Limit=0` means no limit for the current run
 
 ## Workspace Layout
 
@@ -334,11 +333,17 @@ The script uses heuristic extraction, so it is not guaranteed to be perfect. Aft
 
 - `OstranautsTranslator.exe translate -tzh`
 
+### Test One Body-text Batch
+
+- `OstranautsTranslator.exe test -tzh`
+
+`test` uses the same body-text translation settings as `translate`, but it stops after one completed body-text batch and saves that batch to the translation database immediately. This is useful for checking prompt quality and glossary behavior before you launch a long full translation run.
+
 `translate` reads these values from `config.ini`:
 
 - `[LLMTranslate]`: `ApiKey`, `Url`, `Model`, `Temperature`, `MaxTokens`, `BatchSize`
 - `[TranslateGlossary]`: `SystemPrompt`, `OverwriteExisting`
-- `[TranslateLlm]`: `SystemPrompt`, `Limit`, `TranslationState`, `Translator`, `TranslateGenericGlossaryFirst`, `RefreshGlossary`, `OverwriteExisting`, `IncludeDraft`
+- `[TranslateLlm]`: `SystemPrompt`, `TranslationState`, `Translator`, `TranslateGenericGlossaryFirst`, `RefreshGlossary`, `OverwriteExisting`, `IncludeDraft`
 
 When `translate` needs to auto-generate the target-language glossary first, it uses the glossary prompt from `[TranslateGlossary] SystemPrompt` for that glossary phase, then switches back to `[TranslateLlm] SystemPrompt` for body-text batches.
 
@@ -347,6 +352,8 @@ Default behavior:
 - if `glossary-en-to-<to>.json` already exists, it is used directly for body-text translation
 - if the target-language glossary does not exist but `glossary.json` does, `translate` generates the target-language glossary first and then submits body-text batches
 - LLM batch submission progress is shown with a progress bar
+- each completed body-text batch is written to the translation database immediately, so rerunning `translate` after an interruption continues from the remaining untranslated entries when `OverwriteExisting=false`
+- `test` runs the same selection logic but stops after the first completed body-text batch and writes that batch to the database immediately
 
 ### Recommended Workflow
 

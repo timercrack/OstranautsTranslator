@@ -48,15 +48,6 @@ internal static class ToolConfigurationResolver
          LlmTranslateDefaults.DefaultGlossaryOverwriteExisting,
          "[TranslateGlossary] OverwriteExisting" );
 
-      var limit = ParseNonNegativeInt(
-         GetDictionaryValue( iniValues, "TranslateLlm", "Limit" ),
-         LlmTranslateDefaults.DefaultLimit,
-         "[TranslateLlm] Limit" );
-      if( limit == 0 )
-      {
-         limit = int.MaxValue;
-      }
-
       var translationState = FirstNonEmpty( GetDictionaryValue( iniValues, "TranslateLlm", "TranslationState" ) )
          ?? LlmTranslateDefaults.DefaultTranslationState;
       var translator = FirstNonEmpty( GetDictionaryValue( iniValues, "TranslateLlm", "Translator" ) )
@@ -111,7 +102,6 @@ internal static class ToolConfigurationResolver
          new TranslateGlossaryExecutionSettings(
             glossaryOverwriteExisting ),
          new TranslateLlmExecutionSettings(
-            limit,
             translationState,
             translator,
             translateGenericGlossaryFirst,
@@ -231,21 +221,6 @@ internal static class ToolConfigurationResolver
       }
 
       throw new InvalidOperationException( $"{settingName} must be a positive integer, but got '{rawValue}'." );
-   }
-
-   private static int ParseNonNegativeInt( string? rawValue, int defaultValue, string settingName )
-   {
-      if( string.IsNullOrWhiteSpace( rawValue ) )
-      {
-         return defaultValue;
-      }
-
-      if( int.TryParse( rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed ) && parsed >= 0 )
-      {
-         return parsed;
-      }
-
-      throw new InvalidOperationException( $"{settingName} must be a non-negative integer, but got '{rawValue}'." );
    }
 
    private static float ParseFloat( string? rawValue, float defaultValue, string settingName )

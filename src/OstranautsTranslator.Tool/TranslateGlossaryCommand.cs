@@ -49,7 +49,10 @@ internal static class TranslateGlossaryCommand
       Console.WriteLine( $"Existing entries: {existingGlossary.EntryCount}" );
       Console.WriteLine( $"Overwrite existing: {glossarySettings.OverwriteExisting}" );
 
-      using var client = new DeepSeekClient( settings );
+      using var client = new DeepSeekClient(
+         settings,
+         diagnosticsDirectoryPath: workspace.LlmDiagnosticsDirectoryPath,
+         diagnosticLabel: "glossary" );
       var translatedGlossary = await GenericGlossaryTranslationService.TranslateAsync(
          genericGlossary,
          existingGlossary,

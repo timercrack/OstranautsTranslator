@@ -346,7 +346,7 @@ ORDER BY s.occurrence_count DESC, s.id;";
       return results;
    }
 
-   public IReadOnlyList<TranslationEntry> GetEntriesForTranslation( int limit, bool includeDraft, bool overwriteExisting )
+   public IReadOnlyList<TranslationEntry> GetEntriesForTranslation( bool includeDraft, bool overwriteExisting )
    {
       var textProcessingConfiguration = GetTextProcessingConfiguration();
 
@@ -357,9 +357,7 @@ ORDER BY s.occurrence_count DESC, s.id;";
          ( overwriteExisting
             ? string.Empty
             : "AND (t.id IS NULL OR t.translated_text IS NULL OR t.translated_text = '' OR COALESCE(t.translation_state, 'untranslated') <> 'final')" )
-         + ( includeDraft ? string.Empty : "\nAND (t.id IS NULL OR COALESCE(t.translation_state, 'untranslated') <> 'draft')" )
-         + "\nLIMIT $limit;" );
-      command.Parameters.AddWithValue( "$limit", limit );
+         + ( includeDraft ? string.Empty : "\nAND (t.id IS NULL OR COALESCE(t.translation_state, 'untranslated') <> 'draft')" ) );
 
       using var reader = command.ExecuteReader();
       var results = new List<TranslationEntry>();

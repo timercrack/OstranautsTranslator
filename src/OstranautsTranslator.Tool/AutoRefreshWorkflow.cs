@@ -52,7 +52,6 @@ internal sealed class AutoRefreshWorkflow
       };
       var translationSettings = resolvedConfiguration.TranslationSettings with
       {
-         Limit = int.MaxValue,
          TranslateGenericGlossaryFirst = false,
          RefreshGlossary = false,
          OverwriteExisting = decision.Mode == AutoRefreshMode.FullRebuild,

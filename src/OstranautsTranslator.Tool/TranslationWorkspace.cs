@@ -30,6 +30,8 @@ internal sealed class TranslationWorkspace
 
    public string RuntimeExportsDirectoryPath { get; }
 
+   public string LlmDiagnosticsDirectoryPath => Path.Combine( RootPath, "logs" );
+
    public string GetGlossaryPath( string fromLanguage, string toLanguage )
    {
       return Path.Combine( ReferenceDirectoryPath, $"glossary-{fromLanguage}-to-{toLanguage}.json" );

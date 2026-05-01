@@ -17,7 +17,6 @@ internal sealed record TranslateGlossaryExecutionSettings(
    bool OverwriteExisting );
 
 internal sealed record TranslateLlmExecutionSettings(
-   int Limit,
    string TranslationState,
    string Translator,
    bool TranslateGenericGlossaryFirst,
@@ -60,7 +59,6 @@ Avoid fantasy, archaic, overly literary, overly heroic, or internet-meme phrasin
    public const float DefaultTemperature = 0.2f;
    public const int DefaultMaxTokens = 8192;
    public const int DefaultBatchSize = 100;
-   public const int DefaultLimit = int.MaxValue;
    public const string DefaultTranslationState = "final";
    public const string DefaultTranslator = "deepseek";
    public const bool DefaultTranslateGenericGlossaryFirst = true;

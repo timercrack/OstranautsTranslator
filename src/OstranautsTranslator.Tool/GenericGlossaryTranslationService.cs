@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -18,6 +19,7 @@ internal static class GenericGlossaryTranslationService
    {
       WriteIndented = true,
       DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+      Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
    };
 
    private static readonly Regex MultiSpaceRegex = new( @"\s+", RegexOptions.Compiled );

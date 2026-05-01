@@ -71,6 +71,8 @@ internal static class Program
                return await TranslateGlossaryCommand.ExecuteAsync( TranslateLlmCommandOptions.Parse( args.Skip( 1 ).ToArray() ), cancellationTokenSource.Token ).ConfigureAwait( false );
             case "translate":
                return await TranslateLlmCommand.ExecuteAsync( TranslateLlmCommandOptions.Parse( args.Skip( 1 ).ToArray() ), cancellationTokenSource.Token ).ConfigureAwait( false );
+            case "test":
+               return await RunTestTranslationAsync( args.Skip( 1 ).ToArray(), cancellationTokenSource.Token ).ConfigureAwait( false );
             default:
                Console.Error.WriteLine( $"Unknown command '{command}'." );
                PrintUsage();
@@ -234,6 +236,12 @@ internal static class Program
       return 0;
    }
 
+   private static Task<int> RunTestTranslationAsync( IReadOnlyList<string> args, CancellationToken cancellationToken )
+   {
+      var options = TranslateLlmCommandOptions.Parse( args );
+      return TranslateLlmCommand.ExecuteAsync( options, cancellationToken, maxCompletedBatchCountOverride: 1, testMode: true );
+   }
+
    private static bool IsListLanguagesCommand( string command )
    {
       return command.Equals( "-l", StringComparison.OrdinalIgnoreCase );
@@ -268,6 +276,7 @@ internal static class Program
       Console.WriteLine( $"  rebuild [-t<lang>]" );
       Console.WriteLine( $"  glossary [-t<lang>]" );
       Console.WriteLine( $"  translate [-t<lang>]" );
+      Console.WriteLine( $"  test [-t<lang>]" );
       Console.WriteLine( $"  deploy [-t<lang>]" );
       Console.WriteLine();
       Console.WriteLine( "More:" );
@@ -283,6 +292,7 @@ internal static class Program
       Console.WriteLine( "  auto    : version check -> no-op / full rebuild / incremental update" );
       Console.WriteLine( "  rebuild : always runs scan -> generate -> glossary -> translate -> deploy" );
       Console.WriteLine( "  generate: runs bundled generate_generic_glossary.py" );
+      Console.WriteLine( "  test    : translates and saves exactly one body-text batch, skips glossary generation, and logs LLM request/response" );
       Console.WriteLine( "  jsonl   : source_kind + source_id/source_key" );
       Console.WriteLine( "  glossary: <workspace>\\reference\\glossary.json + glossary-<from>-to-<to>.json" );
       Console.WriteLine( $"  deploy  : author is fixed to '{RuntimeTranslationDeployment.DefaultAuthor}'" );
