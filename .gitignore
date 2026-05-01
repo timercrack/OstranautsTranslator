@@ -10,4 +10,5 @@ Directory.Build.props.user
 artifacts/
 .github/
 .vscode/
+*.code-workspace
 tmp/generated-charsets/
