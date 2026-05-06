@@ -1,5 +1,7 @@
 using System.Text;
 using OstranautsTranslator.Core;
+using OstranautsTranslator.Core.Processing;
+using OstranautsTranslator.Tool.Processing;
 
 namespace OstranautsTranslator.Tool;
 
@@ -26,6 +28,8 @@ internal static class TranslateLlmCommand
       int AppliedCount,
       int SkippedCount );
 
+   private const string InvalidBatchResponseMessagePrefix = "DeepSeek returned an invalid response.";
+
    public static async Task<int> ExecuteAsync(
       TranslateLlmCommandOptions options,
       CancellationToken cancellationToken,
@@ -48,6 +52,7 @@ internal static class TranslateLlmCommand
 
       var translationDatabase = new TranslationDatabase( databasePath, fromLanguage, toLanguage );
       translationDatabase.Initialize();
+      var textProcessingConfiguration = translationDatabase.GetTextProcessingConfiguration();
 
       var translatedGlossaryPath = workspace.GetGlossaryPath( fromLanguage, toLanguage );
       var genericGlossaryPath = workspace.GetGenericGlossaryPath();
@@ -107,7 +112,9 @@ internal static class TranslateLlmCommand
       }
 
       var eligibleEntries = selectedEntries
-         .Where( entry => !entry.NeedsManualReview && !string.Equals( entry.TokenPolicy, BracketTokenPolicies.SkipControl, StringComparison.Ordinal ) )
+         .Where( entry => !entry.NeedsManualReview
+            && !string.Equals( entry.TokenPolicy, BracketTokenPolicies.SkipControl, StringComparison.Ordinal )
+            && !ShouldSkipAutomaticTranslation( entry, textProcessingConfiguration ) )
          .ToList();
       var skippedByPolicy = selectedEntries.Count - eligibleEntries.Count;
       var requiresGlossaryGeneration = translationSettings.TranslateGenericGlossaryFirst
@@ -122,7 +129,7 @@ internal static class TranslateLlmCommand
       Console.WriteLine( $"Translate: selected={selectedEntries.Count}, eligible={eligibleEntries.Count}, skippedByPolicy={skippedByPolicy}." );
       if( eligibleEntries.Count == 0 )
       {
-         Console.WriteLine( "No entries were eligible for automatic LLM translation after token policy filtering." );
+         Console.WriteLine( "No entries were eligible for automatic LLM translation after policy filtering." );
          return 0;
       }
 
@@ -159,7 +166,7 @@ internal static class TranslateLlmCommand
          Console.WriteLine( $"Translate: running {plannedEntryCount} entries across {plannedBatchCount} batch(es) in test mode." );
       }
 
-      using var progressBar = new ConsoleProgressBar( "Text translation", plannedBatchCount );
+      using var progressBar = new ConsoleProgressBar( "Text translation", plannedBatchCount, showEta: true );
       using var client = new DeepSeekClient(
          translationClientSettings,
          diagnosticsDirectoryPath: workspace.LlmDiagnosticsDirectoryPath,
@@ -171,16 +178,7 @@ internal static class TranslateLlmCommand
 
          var batch = eligibleEntries.Skip( offset ).Take( safeBatchSize ).ToList();
          var batchNumber = batchIndex + 1;
-         var overallBatchNumber = offset / safeBatchSize + 1;
-         if( plannedBatchCount == totalBatchCount )
-         {
-            Console.WriteLine( $"Batch {batchNumber}/{plannedBatchCount} ({batch.Count})..." );
-         }
-         else
-         {
-            Console.WriteLine( $"Batch {batchNumber}/{plannedBatchCount} (overall {overallBatchNumber}/{totalBatchCount}, {batch.Count})..." );
-         }
-
+         progressBar.Report( batchNumber );
          var batchSummary = await TranslateAndApplyBatchAsync(
             client,
             translationDatabase,
@@ -188,13 +186,13 @@ internal static class TranslateLlmCommand
             glossary,
             translationSettings,
             translatorName,
+            detail => progressBar.Report( batchNumber, detail ),
             cancellationToken ).ConfigureAwait( false );
 
          appliedCount += batchSummary.AppliedCount;
          skippedExistingCount += batchSummary.SkippedCount;
          submittedCount += batchSummary.SubmittedCount;
-         progressBar.Report( batchNumber, $"entries {submittedCount}/{plannedEntryCount}, saved {appliedCount}" );
-         Console.WriteLine( $"Done  {batchNumber}/{plannedBatchCount}. Total {submittedCount}/{plannedEntryCount}. Saved {batchSummary.AppliedCount}/{batchSummary.SubmittedCount} this batch, {appliedCount} overall." );
+         progressBar.Report( batchNumber );
       }
 
       Console.WriteLine( $"Translate complete. Selected={selectedEntries.Count}, Eligible={eligibleEntries.Count}, Submitted={submittedCount}, Applied={appliedCount}, SkippedByPolicy={skippedByPolicy}, SkippedExisting={skippedExistingCount}." );
@@ -208,13 +206,52 @@ internal static class TranslateLlmCommand
       TranslationGlossary glossary,
       TranslateLlmExecutionSettings translationSettings,
       string translatorName,
+      Action<string>? detailReporter,
       CancellationToken cancellationToken )
    {
       cancellationToken.ThrowIfCancellationRequested();
 
       var batchTexts = batch.Select( entry => entry.RawText ).ToList();
       var batchContext = CreateBatchContext( batch, glossary );
-      var translations = await client.TranslateBatchAsync( batchTexts, batchContext, cancellationToken ).ConfigureAwait( false );
+      IReadOnlyList<string> translations;
+      try
+      {
+         translations = await client.TranslateBatchAsync( batchTexts, batchContext, cancellationToken ).ConfigureAwait( false );
+      }
+      catch( InvalidOperationException e ) when( batch.Count > 1 && IsRetryableInvalidBatchResponse( e ) )
+      {
+         var splitIndex = batch.Count / 2;
+         var firstHalf = batch.Take( splitIndex ).ToList();
+         var secondHalf = batch.Skip( splitIndex ).ToList();
+
+         detailReporter?.Invoke( $"retry {batch.Count}->{firstHalf.Count}+{secondHalf.Count}" );
+
+         var firstSummary = await TranslateAndApplyBatchAsync(
+            client,
+            translationDatabase,
+            firstHalf,
+            glossary,
+            translationSettings,
+            translatorName,
+            detailReporter,
+            cancellationToken ).ConfigureAwait( false );
+
+         var secondSummary = await TranslateAndApplyBatchAsync(
+            client,
+            translationDatabase,
+            secondHalf,
+            glossary,
+            translationSettings,
+            translatorName,
+            detailReporter,
+            cancellationToken ).ConfigureAwait( false );
+
+         return new BatchApplySummary(
+            firstSummary.SubmittedCount + secondSummary.SubmittedCount,
+            firstSummary.AppliedCount + secondSummary.AppliedCount,
+            firstSummary.SkippedCount + secondSummary.SkippedCount );
+      }
+
       if( translations.Count != batch.Count )
       {
          throw new InvalidOperationException( $"DeepSeek returned {translations.Count} translations for a batch of {batch.Count} entries." );
@@ -236,6 +273,12 @@ internal static class TranslateLlmCommand
          batchUpdates.Count,
          appliedForBatch,
          batchUpdates.Count - appliedForBatch );
+   }
+
+   private static bool IsRetryableInvalidBatchResponse( InvalidOperationException exception )
+   {
+      return exception.Message.StartsWith( InvalidBatchResponseMessagePrefix, StringComparison.Ordinal )
+         || exception.Message.StartsWith( "DeepSeek returned ", StringComparison.Ordinal );
    }
 
    private static string? CreateBatchContext( IReadOnlyList<TranslationEntry> batch, TranslationGlossary glossary )
@@ -518,6 +561,12 @@ internal static class TranslateLlmCommand
 
       return !string.IsNullOrWhiteSpace(
          new BracketTokenPolicyMetadata( entry.TokenPolicy, entry.TokenExamples, entry.NeedsManualReview, entry.TokenCorrections ).CreateLlmInstruction() );
+   }
+
+   private static bool ShouldSkipAutomaticTranslation( TranslationEntry entry, CorpusTextProcessingConfiguration configuration )
+   {
+      return string.Equals( entry.SourceKind, "runtime", StringComparison.Ordinal )
+         && RuntimeVolatileTextDetector.LooksVolatile( entry.RawText, configuration.HandleRichText );
    }
 
    private static bool TryGetEntryTypeHint( TranslationEntry entry, out string? entryTypeHint )

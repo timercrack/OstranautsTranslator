@@ -95,8 +95,8 @@ internal sealed class TranslationStatusWindow
       DrawRow( ref y, "目标语言", snapshot.TargetLanguage, windowWidth );
       DrawRow( ref y, "数据库状态", snapshot.DatabaseStatus, windowWidth );
       DrawRow( ref y, "已加载条目", snapshot.LoadedEntryCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
-      DrawRow( ref y, "查库次数", snapshot.LookupCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
-      DrawRow( ref y, "数据库命中", snapshot.DatabaseHitCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
+      DrawRow( ref y, "运行时查找", snapshot.LookupCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
+      DrawRow( ref y, "词库命中", snapshot.DatabaseHitCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
       DrawRow( ref y, "native_mod 直忽略", snapshot.NativeModIgnoredCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
       DrawRow( ref y, "唯一 native_mod 忽略", snapshot.UniqueNativeModIgnoredCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
       DrawRow( ref y, "命中率", ( snapshot.HitRate * 100d ).ToString( "0.0", CultureInfo.InvariantCulture ) + "%", windowWidth );

@@ -51,6 +51,11 @@ internal sealed class RuntimeMissCollector
          return false;
       }
 
+      if( RuntimeVolatileTextDetector.LooksVolatile( value, configuration ) )
+      {
+         return false;
+      }
+
       if( !_capturedValues.TryAdd( value, 0 ) )
       {
          return false;

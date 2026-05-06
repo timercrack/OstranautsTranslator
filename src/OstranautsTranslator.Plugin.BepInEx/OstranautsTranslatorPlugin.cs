@@ -1,11 +1,15 @@
 using System;
+using System.Collections.Concurrent;
 using System.IO;
+using System.Text.RegularExpressions;
 using BepInEx;
 using HarmonyLib;
 using OstranautsTranslator.Core;
+using OstranautsTranslator.Core.Processing;
 using OstranautsTranslator.Core.Storage;
 using OstranautsTranslator.Plugin.BepInEx.Configuration;
 using OstranautsTranslator.Plugin.BepInEx.Fonts;
+using OstranautsTranslator.Plugin.BepInEx.Hooks;
 using OstranautsTranslator.Plugin.BepInEx.Input;
 using OstranautsTranslator.Plugin.BepInEx.UI;
 using SQLitePCL;
@@ -17,12 +21,17 @@ namespace OstranautsTranslator.Plugin.BepInEx;
 public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
 {
    private const KeyCode StatusWindowToggleKey = KeyCode.F6;
+   private const int MaxCachedTranslationResults = 32768;
+   private static readonly Regex LeadingYouRegex = new Regex( @"(^|\n)You(?=(?:\s|[，。？！：；、,.!?;:()\[\]{}<>\""'“”‘’]))", RegexOptions.Compiled );
+   private static readonly Regex PlaceholderLoreRegex = new Regex( @"^\$template\b", RegexOptions.Compiled | RegexOptions.IgnoreCase );
    private static bool _runtimeProxyCreated;
    private static bool _sqliteRuntimeInitialized;
    private Harmony _harmony;
    private RuntimeTranslationCatalog _catalog = RuntimeTranslationCatalog.Empty;
    private RuntimeMissCollector _runtimeMissCollector;
    private readonly TranslationRuntimeStatistics _translationStatistics = new TranslationRuntimeStatistics();
+   private readonly ConcurrentDictionary<string, CachedTranslationResult> _translationResultCache = new ConcurrentDictionary<string, CachedTranslationResult>( StringComparer.Ordinal );
+   private readonly ConcurrentDictionary<string, byte> _missingProjectionCache = new ConcurrentDictionary<string, byte>( StringComparer.Ordinal );
    private TranslationStatusWindow _statusWindow;
    private bool _inputSupported = true;
    private bool _inputLoopLogged;
@@ -67,6 +76,9 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
          _harmony = new Harmony( PluginData.Identifier );
          _harmony.PatchAll( typeof( OstranautsTranslatorPlugin ).Assembly );
 
+         Logger.LogInfo( "Running initial runtime text scan..." );
+         RuntimeTextRescanner.ForceScanAll();
+
          Logger.LogInfo( "Applying configured TMP fallback fonts to currently loaded text components..." );
          TmpFontManager.ApplyOverrideFontToLoadedTextComponents();
 
@@ -90,6 +102,7 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
    internal void TickRuntime()
    {
       TmpFontManager.Tick();
+      RuntimeTextRescanner.Tick();
 
       if( !_inputLoopLogged )
       {
@@ -155,6 +168,9 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
 
    private void ReloadCatalog()
    {
+      _translationResultCache.Clear();
+      _missingProjectionCache.Clear();
+
       if( !PluginSettings.Enabled.Value )
       {
          _catalog = RuntimeTranslationCatalog.Empty;
@@ -270,18 +286,46 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
             return value;
          }
 
+         if( LooksLikeVolatileRuntimeValue( value, _catalog.Configuration ) )
+         {
+            CacheTranslationResult( value, value, CachedTranslationKind.VolatileBypass );
+            return value;
+         }
+
+         if( LooksLikePlaceholderRuntimeValue( value ) )
+         {
+            CacheTranslationResult( value, value, CachedTranslationKind.PlaceholderBypass );
+            return value;
+         }
+
+         if( _translationResultCache.TryGetValue( value, out var cachedResult ) )
+         {
+            return cachedResult.Value;
+         }
+
+          var projection = RuntimeTextProjector.CreateProjection( value, _catalog.Configuration );
+          var projectionLookupKey = CreateProjectionLookupKey( projection );
+          if( projectionLookupKey != null && _missingProjectionCache.ContainsKey( projectionLookupKey ) )
+          {
+             CacheTranslationResult( value, value, CachedTranslationKind.NoMatch );
+             return value;
+          }
+
          _translationStatistics.RecordLookup();
 
          var lookupResult = _catalog.Lookup( value, out var translated );
          if( lookupResult == RuntimeTranslationLookupResult.IgnoredNativeModSource )
          {
             _translationStatistics.RecordIgnoredNativeModSource( value );
+            CacheTranslationResult( value, value, CachedTranslationKind.IgnoredNativeModSource );
+            CacheMissingProjection( projectionLookupKey );
             return value;
          }
 
          if( lookupResult == RuntimeTranslationLookupResult.Translated )
          {
             _translationStatistics.RecordDatabaseHit( value, translated );
+            CacheTranslationResult( value, translated, CachedTranslationKind.Translated );
 
             if( PluginSettings.LogSuccessfulTranslations.Value )
             {
@@ -291,7 +335,15 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
             return translated;
          }
 
-         if( PluginSettings.CaptureMissingTranslations.Value )
+         var normalizedMixedText = NormalizePartiallyLocalizedText( value );
+         if( !string.Equals( normalizedMixedText, value, StringComparison.Ordinal ) )
+         {
+            _translationStatistics.RecordDatabaseMiss( value );
+            CacheTranslationResult( value, normalizedMixedText, CachedTranslationKind.NormalizedFallback );
+            return normalizedMixedText;
+         }
+
+         if( PluginSettings.CaptureMissingTranslations.Value && ShouldCaptureMissingTranslation( value, _catalog.Configuration ) )
          {
             if( _runtimeMissCollector.Capture( _catalog.DatabasePath, _catalog.Configuration, value ) )
             {
@@ -300,6 +352,8 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
          }
 
          _translationStatistics.RecordDatabaseMiss( value );
+         CacheTranslationResult( value, value, CachedTranslationKind.NoMatch );
+         CacheMissingProjection( projectionLookupKey );
 
          if( PluginSettings.LogMissingTranslations.Value )
          {
@@ -313,6 +367,115 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
       }
 
       return value;
+   }
+
+   private void CacheTranslationResult( string sourceText, string translatedText, CachedTranslationKind kind )
+   {
+      if( string.IsNullOrEmpty( sourceText ) ) return;
+
+      if( _translationResultCache.Count >= MaxCachedTranslationResults )
+      {
+         _translationResultCache.Clear();
+      }
+
+      _translationResultCache[ sourceText ] = new CachedTranslationResult( translatedText, kind );
+   }
+
+   private void CacheMissingProjection( string projectionLookupKey )
+   {
+      if( string.IsNullOrEmpty( projectionLookupKey ) ) return;
+
+      if( _missingProjectionCache.Count >= MaxCachedTranslationResults )
+      {
+         _missingProjectionCache.Clear();
+      }
+
+      _missingProjectionCache.TryAdd( projectionLookupKey, 0 );
+   }
+
+      private static bool ShouldCaptureMissingTranslation( string value, RuntimeTextProcessingConfiguration configuration )
+   {
+      return !ContainsCjkCharacters( value )
+         && !LooksLikeVolatileRuntimeValue( value, configuration )
+         && !LooksLikePlaceholderRuntimeValue( value );
+   }
+
+   private static string NormalizePartiallyLocalizedText( string value )
+   {
+      if( string.IsNullOrEmpty( value ) || !ContainsCjkCharacters( value ) )
+      {
+         return value;
+      }
+
+      return LeadingYouRegex.Replace( value, match => match.Groups[ 1 ].Value + "你" );
+   }
+
+   private static bool ContainsCjkCharacters( string value )
+   {
+      if( string.IsNullOrEmpty( value ) )
+      {
+         return false;
+      }
+
+      foreach( var ch in value )
+      {
+         if( ch >= 0x2E80 && ch <= 0x9FFF )
+         {
+            return true;
+         }
+      }
+
+      return false;
+   }
+
+   private static string CreateProjectionLookupKey( RuntimeTextProjection projection )
+   {
+      if( projection == null || string.IsNullOrWhiteSpace( projection.RenderKey ) ) return string.Empty;
+      return projection.TextKind + "\u001F" + projection.RenderKey;
+   }
+
+   private static bool LooksLikeVolatileRuntimeValue( string value, RuntimeTextProcessingConfiguration configuration )
+   {
+      return RuntimeVolatileTextDetector.LooksVolatile( value, configuration );
+   }
+
+   private static bool LooksLikePlaceholderRuntimeValue( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return false;
+
+      var trimmed = value.Trim();
+      if( trimmed.Length == 0 ) return false;
+
+      if( trimmed.IndexOf( "Lorem ipsum", StringComparison.OrdinalIgnoreCase ) >= 0 ) return true;
+      if( PlaceholderLoreRegex.IsMatch( trimmed ) ) return true;
+      if( trimmed.StartsWith( "TutorialDerelict", StringComparison.Ordinal ) ) return true;
+      if( trimmed.StartsWith( "IsStarting", StringComparison.Ordinal ) ) return true;
+      if( string.Equals( trimmed, "strName", StringComparison.Ordinal ) ) return true;
+
+      return false;
+   }
+
+   private readonly struct CachedTranslationResult
+   {
+      public CachedTranslationResult( string value, CachedTranslationKind kind )
+      {
+         Value = value;
+         Kind = kind;
+      }
+
+      public string Value { get; }
+
+      public CachedTranslationKind Kind { get; }
+   }
+
+   private enum CachedTranslationKind
+   {
+      NoMatch,
+      IgnoredNativeModSource,
+      NormalizedFallback,
+      Translated,
+      VolatileBypass,
+      PlaceholderBypass,
    }
 
    private string ResolveDatabasePath()

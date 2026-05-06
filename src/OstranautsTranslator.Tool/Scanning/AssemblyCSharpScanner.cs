@@ -22,11 +22,16 @@ internal sealed class AssemblyCSharpScanner
       CuratedTypeRule.ByName( "CCTV", "cctv-runtime" ),
       CuratedTypeRule.ByName( "AIShipManager", "ai-ship-manager" ),
       CuratedTypeRule.ByName( "GUIDockSys", "docksys-runtime" ),
+      CuratedTypeRule.ByName( "GUIPDA", "pda-runtime" ),
       CuratedTypeRule.ByName( "PDAVisualisers", "pda-visualisers" ),
       CuratedTypeRule.ByName( "Powered", "powered-runtime" ),
       CuratedTypeRule.ByName( "Ship", "ship-runtime" ),
       CuratedTypeRule.ByName( "WorkManager", "work-manager" ),
       CuratedTypeRule.ByFullName( "Ostranauts.Systems.Ferry", "ferry-runtime" ),
+      CuratedTypeRule.ByNamespacePrefix( "Ostranauts.ShipGUIs.MFD", "mfd-runtime" ),
+      CuratedTypeRule.ByNamespacePrefix( "Ostranauts.Objectives", "objectives-runtime" ),
+      CuratedTypeRule.ByNamespacePrefix( "Ostranauts.UI.PDA", "pda-runtime" ),
+      CuratedTypeRule.ByNamespacePrefix( "Ostranauts.Ships.Comms", "comms-runtime" ),
       CuratedTypeRule.ByNamespacePrefix( "Ostranauts.Core.Tutorials", "tutorial-runtime" ),
       CuratedTypeRule.ByFullName( "Ostranauts.Ships.Commands.Guard", "ships-command-guard" ),
       CuratedTypeRule.ByFullName( "Ostranauts.Ships.Commands.Lurk", "ships-command-lurk" ),
@@ -296,6 +301,7 @@ internal sealed class AssemblyCSharpScanner
          || nextCallDisplayName.Contains( "::LogMessage(", StringComparison.Ordinal )
          || nextCallDisplayName.Contains( "::SetToolTip(", StringComparison.Ordinal )
          || nextCallDisplayName.Contains( "::SetText(", StringComparison.Ordinal )
+         || nextCallDisplayName.Contains( "GUIJobItem::SetData(", StringComparison.Ordinal )
          || nextCallDisplayName.Contains( "::SetPersistentRef(", StringComparison.Ordinal )
          || nextCallDisplayName.Contains( "::set_text(", StringComparison.Ordinal )
          || nextCallDisplayName.Contains( "GUI::Label(", StringComparison.Ordinal )
