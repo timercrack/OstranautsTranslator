@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using HarmonyLib;
 
 namespace OstranautsTranslator.Plugin.BepInEx.Hooks;
@@ -16,6 +17,15 @@ internal static class GameTypeResolver
 
 internal static class RuntimeHookTranslationHelper
 {
+   private static readonly Dictionary<string, FieldInfo> InstanceFieldCache = new Dictionary<string, FieldInfo>( StringComparer.Ordinal );
+   private static readonly Dictionary<string, PropertyInfo> PropertyCache = new Dictionary<string, PropertyInfo>( StringComparer.Ordinal );
+   private static readonly ConditionalWeakTable<object, TextComponentState> TextComponentStates = new ConditionalWeakTable<object, TextComponentState>();
+
+   private sealed class TextComponentState
+   {
+      public string LastSeenText = string.Empty;
+   }
+
    public static void TranslateStringField( object target, string fieldName, string hookName )
    {
       TranslateStringField( target, fieldName, value => OstranautsTranslatorPlugin.Translate( value, hookName + "." + fieldName ) );
@@ -25,7 +35,7 @@ internal static class RuntimeHookTranslationHelper
    {
       if( target == null ) return;
 
-      var field = target.GetType().GetField( fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      var field = GetInstanceField( target.GetType(), fieldName );
       if( field == null || field.FieldType != typeof( string ) ) return;
 
       var value = field.GetValue( target ) as string;
@@ -43,7 +53,7 @@ internal static class RuntimeHookTranslationHelper
    {
       if( target == null ) return;
 
-      var field = target.GetType().GetField( fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      var field = GetInstanceField( target.GetType(), fieldName );
       if( field?.GetValue( target ) is not IList values ) return;
 
       for( var i = 0; i < values.Count; i++ )
@@ -62,7 +72,7 @@ internal static class RuntimeHookTranslationHelper
    {
       if( target == null ) return;
 
-      var field = target.GetType().GetField( fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      var field = GetInstanceField( target.GetType(), fieldName );
       if( field?.GetValue( target ) is not IEnumerable values ) return;
 
       foreach( var item in values )
@@ -74,30 +84,69 @@ internal static class RuntimeHookTranslationHelper
 
    public static void TranslateTextComponentField( object target, string fieldName, string hookName )
    {
+      TranslateTextComponentField( target, fieldName, value => RuntimeTextHookHelper.TranslateTextValue( value, hookName + "." + fieldName ) );
+   }
+
+   public static void TranslateTextComponentField( object target, string fieldName, Func<string, string> translator )
+   {
       if( target == null ) return;
 
-      var field = target.GetType().GetField( fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      var field = GetInstanceField( target.GetType(), fieldName );
       var component = field?.GetValue( target );
       if( component == null ) return;
 
-      var textProperty = component.GetType().GetProperty( "text", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
-      if( textProperty == null || !textProperty.CanRead || !textProperty.CanWrite || textProperty.PropertyType != typeof( string ) ) return;
+      var textProperty = GetStringProperty( component.GetType(), "text" );
+      if( textProperty == null ) return;
 
       var value = textProperty.GetValue( component ) as string;
       if( string.IsNullOrEmpty( value ) ) return;
 
-      textProperty.SetValue( component, RuntimeTextHookHelper.TranslateTextValue( value, hookName + "." + fieldName ) );
+      var translated = translator( value );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         textProperty.SetValue( component, translated );
+      }
+   }
+
+   public static void TranslateTextComponentFieldIfChanged( object target, string fieldName, string hookName )
+   {
+      TranslateTextComponentFieldIfChanged( target, fieldName, value => RuntimeTextHookHelper.TranslateTextValue( value, hookName + "." + fieldName ) );
+   }
+
+   public static void TranslateTextComponentFieldIfChanged( object target, string fieldName, Func<string, string> translator )
+   {
+      if( target == null ) return;
+
+      var field = GetInstanceField( target.GetType(), fieldName );
+      var component = field?.GetValue( target );
+      if( component == null ) return;
+
+      var textProperty = GetStringProperty( component.GetType(), "text" );
+      if( textProperty == null ) return;
+
+      var value = textProperty.GetValue( component ) as string ?? string.Empty;
+      var state = TextComponentStates.GetOrCreateValue( component );
+      if( string.Equals( state.LastSeenText, value, StringComparison.Ordinal ) ) return;
+
+      var translated = translator( value );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         textProperty.SetValue( component, translated );
+         value = translated;
+      }
+
+      state.LastSeenText = value;
    }
 
    public static void SetTextComponentField( object target, string fieldName, string value )
    {
       if( target == null ) return;
 
-      var field = target.GetType().GetField( fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      var field = GetInstanceField( target.GetType(), fieldName );
       var component = field?.GetValue( target );
       if( component == null ) return;
 
-      var textProperty = component.GetType().GetProperty( "text", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      var textProperty = GetStringProperty( component.GetType(), "text" );
       if( textProperty == null || !textProperty.CanWrite || textProperty.PropertyType != typeof( string ) ) return;
 
       textProperty.SetValue( component, value );
@@ -107,7 +156,7 @@ internal static class RuntimeHookTranslationHelper
    {
       if( component == null ) return;
 
-      var textProperty = component.GetType().GetProperty( "text", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      var textProperty = GetStringProperty( component.GetType(), "text" );
       if( textProperty == null || !textProperty.CanWrite || textProperty.PropertyType != typeof( string ) ) return;
 
       textProperty.SetValue( component, value );
@@ -117,7 +166,7 @@ internal static class RuntimeHookTranslationHelper
    {
       if( target == null ) return;
 
-      var field = target.GetType().GetField( fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      var field = GetInstanceField( target.GetType(), fieldName );
       TranslateDropdownOptions( field?.GetValue( target ), translator );
    }
 
@@ -125,14 +174,14 @@ internal static class RuntimeHookTranslationHelper
    {
       if( dropdown == null ) return;
 
-      var optionsProperty = dropdown.GetType().GetProperty( "options", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      var optionsProperty = GetProperty( dropdown.GetType(), "options" );
       if( optionsProperty?.GetValue( dropdown ) is not IList options ) return;
 
       foreach( var option in options )
       {
          if( option == null ) continue;
 
-         var textProperty = option.GetType().GetProperty( "text", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+         var textProperty = GetStringProperty( option.GetType(), "text" );
          if( textProperty == null || !textProperty.CanRead || !textProperty.CanWrite || textProperty.PropertyType != typeof( string ) ) continue;
 
          var text = textProperty.GetValue( option ) as string;
@@ -141,7 +190,67 @@ internal static class RuntimeHookTranslationHelper
          textProperty.SetValue( option, translator( text ) );
       }
 
-      dropdown.GetType().GetMethod( "RefreshShownValue", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic )?.Invoke( dropdown, null );
+      GetMethod( dropdown.GetType(), "RefreshShownValue" )?.Invoke( dropdown, null );
+   }
+
+   public static FieldInfo GetInstanceField( Type type, string fieldName )
+   {
+      var cacheKey = type.AssemblyQualifiedName + "|field|" + fieldName;
+      if( InstanceFieldCache.TryGetValue( cacheKey, out var cachedField ) )
+      {
+         return cachedField;
+      }
+
+      for( var current = type; current != null; current = current.BaseType )
+      {
+         var field = current.GetField( fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+         if( field != null )
+         {
+            InstanceFieldCache[ cacheKey ] = field;
+            return field;
+         }
+      }
+
+      InstanceFieldCache[ cacheKey ] = null;
+      return null;
+   }
+
+   public static PropertyInfo GetProperty( Type type, string propertyName )
+   {
+      var cacheKey = type.AssemblyQualifiedName + "|property|" + propertyName;
+      if( PropertyCache.TryGetValue( cacheKey, out var cachedProperty ) )
+      {
+         return cachedProperty;
+      }
+
+      for( var current = type; current != null; current = current.BaseType )
+      {
+         var property = current.GetProperty( propertyName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+         if( property != null )
+         {
+            PropertyCache[ cacheKey ] = property;
+            return property;
+         }
+      }
+
+      PropertyCache[ cacheKey ] = null;
+      return null;
+   }
+
+   public static PropertyInfo GetStringProperty( Type type, string propertyName )
+   {
+      var property = GetProperty( type, propertyName );
+      return property != null
+         && property.PropertyType == typeof( string )
+         && property.CanRead
+         && property.CanWrite
+         ? property
+         : null;
+   }
+
+   private static MethodInfo GetMethod( Type type, string methodName )
+   {
+      return type.GetMethod( methodName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
    }
 }
 
@@ -599,14 +708,101 @@ internal static class MfdRuntimeTranslationHelper
          return "已对接：" + value.Substring( "Docked: ".Length );
       }
 
+      if( value.Equals( "ACTIVE SENSORS:", StringComparison.Ordinal ) )
+      {
+         return "主动传感器：";
+      }
+
+      if( value.Equals( "PASSIVE SENSORS:", StringComparison.Ordinal ) )
+      {
+         return "被动传感器：";
+      }
+
+      if( value.Equals( "NONE", StringComparison.Ordinal ) )
+      {
+         return "无";
+      }
+
+      if( value.Equals( "NO SENSORS FOUND", StringComparison.Ordinal ) )
+      {
+         return "未发现传感器";
+      }
+
+      if( value.Equals( "Back", StringComparison.Ordinal ) )
+      {
+         return "返回";
+      }
+
+      if( value.StartsWith( "LOCKING ", StringComparison.Ordinal ) && value.EndsWith( "%", StringComparison.Ordinal ) )
+      {
+         return "锁定中 " + value.Substring( "LOCKING ".Length );
+      }
+
+      if( value.Equals( "<color=green>LOCKED</color>", StringComparison.Ordinal ) )
+      {
+         return "<color=green>已锁定</color>";
+      }
+
+      if( value.Equals( "<color=white>HOSTILE</color>", StringComparison.Ordinal ) )
+      {
+         return "<color=white>敌对</color>";
+      }
+
+      if( value.Equals( "<color=white>FRIENDLY</color>", StringComparison.Ordinal ) )
+      {
+         return "<color=white>友方</color>";
+      }
+
+      if( value.Equals( "MARK", StringComparison.Ordinal ) )
+      {
+         return "标记";
+      }
+
+      if( value.Equals( "MARK: -", StringComparison.Ordinal ) )
+      {
+         return "标记：-";
+      }
+
+      if( value.Equals( "VIZ", StringComparison.Ordinal ) )
+      {
+         return "可视化";
+      }
+
+      if( value.Equals( "<color=green>VIZ</color>", StringComparison.Ordinal ) )
+      {
+         return "<color=green>可视化</color>";
+      }
+
       if( value.StartsWith( "OPT ", StringComparison.Ordinal ) )
       {
          return "光学 " + value.Substring( "OPT ".Length );
       }
 
+      if( value.Equals( "Sensors", StringComparison.Ordinal ) )
+      {
+         return "传感器";
+      }
+
+      if( value.StartsWith( "Sensors: <b>", StringComparison.Ordinal ) )
+      {
+         return "传感器：<b>" + value.Substring( "Sensors: <b>".Length );
+      }
+
       if( value.StartsWith( "Signal:", StringComparison.Ordinal ) )
       {
          return "信号：" + value.Substring( "Signal:".Length );
+      }
+
+      if( value.EndsWith( ": <color=green>ON</color>", StringComparison.Ordinal ) )
+      {
+         var label = value.Substring( 0, value.Length - ": <color=green>ON</color>".Length );
+         return TranslateDisplayText( label ) + "：<color=green>开启</color>";
+      }
+
+      if( value.EndsWith( ": <color=red>OFF</color>", StringComparison.Ordinal ) )
+      {
+         var label = value.Substring( 0, value.Length - ": <color=red>OFF</color>".Length );
+         return TranslateDisplayText( label ) + "：<color=red>关闭</color>";
       }
 
       if( value.StartsWith( "<b>Thrusters: ", StringComparison.Ordinal ) )
@@ -696,6 +892,40 @@ internal static class NavStationRuntimeTranslationHelper
 
       RuntimeTextHookHelper.TranslateHierarchy( goLines, hookName );
    }
+
+   public static void TranslateNavModeLabel()
+   {
+      var guiRenderTargetsType = GameTypeResolver.Get( "GUIRenderTargets" );
+      var goLines = guiRenderTargetsType?.GetField( "goLines", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic )?.GetValue( null ) as UnityEngine.GameObject;
+      var transform = typeof( UnityEngine.GameObject ).GetProperty( "transform", BindingFlags.Instance | BindingFlags.Public )?.GetValue( goLines );
+      var navModeTransform = transform?.GetType().GetMethod( "Find", new[] { typeof( string ) } )?.Invoke( transform, new object[] { "pnlTitle/txtNavMode" } );
+      var navModeComponent = navModeTransform?.GetType().GetMethod( "GetComponent", new[] { typeof( Type ) } )?.Invoke( navModeTransform, new object[] { RuntimeTypeResolver.FindLoadedType( "TMPro.TMP_Text" ) } );
+      if( navModeComponent == null ) return;
+
+      var textProperty = RuntimeHookTranslationHelper.GetStringProperty( navModeComponent.GetType(), "text" );
+      if( textProperty?.GetValue( navModeComponent ) is not string value || string.IsNullOrWhiteSpace( value ) ) return;
+
+      var translated = TranslateNavModeText( value );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         textProperty.SetValue( navModeComponent, translated );
+      }
+   }
+
+   private static string TranslateNavModeText( string value )
+   {
+      const string prefix = "NAV MODE: ";
+      if( !value.StartsWith( prefix, StringComparison.Ordinal ) ) return value;
+
+      var mode = value.Substring( prefix.Length ) switch
+      {
+         "RCS" => "姿控",
+         "PAN" => "平移",
+         var other => RuntimeTextHookHelper.TranslateTextValue( other, "NavStation.NavMode" )
+      };
+
+      return "导航模式：" + mode;
+   }
 }
 
 internal static class ShipRuntimeTranslationHelper
@@ -746,7 +976,7 @@ internal static class ShipRuntimeTranslationHelper
 
       RuntimeHookTranslationHelper.TranslateStringField( guiData, "strFriendlyName", value => RuntimeTextHookHelper.TranslateTextValue( value, hookName + ".strFriendlyName" ) );
 
-      var dictField = guiData.GetType().GetField( "dictPropMap", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      var dictField = RuntimeHookTranslationHelper.GetInstanceField( guiData.GetType(), "dictPropMap" );
       if( dictField?.GetValue( guiData ) is IDictionary<string, string> dict
          && dict.TryGetValue( "strFriendlyName", out var friendlyName )
          && !string.IsNullOrWhiteSpace( friendlyName ) )
@@ -759,7 +989,7 @@ internal static class ShipRuntimeTranslationHelper
    {
       if( panel == null ) return;
 
-      var field = panel.GetType().GetField( "txtArray", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      var field = RuntimeHookTranslationHelper.GetInstanceField( panel.GetType(), "txtArray" );
       if( field?.GetValue( panel ) is not Array textComponents ) return;
 
       for( var i = 0; i < textComponents.Length; i++ )
@@ -767,7 +997,7 @@ internal static class ShipRuntimeTranslationHelper
          var component = textComponents.GetValue( i );
          if( component == null ) continue;
 
-         var textProperty = component.GetType().GetProperty( "text", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+         var textProperty = RuntimeHookTranslationHelper.GetStringProperty( component.GetType(), "text" );
          if( textProperty == null || !textProperty.CanRead || !textProperty.CanWrite || textProperty.PropertyType != typeof( string ) ) continue;
 
          var value = textProperty.GetValue( component ) as string;
@@ -785,13 +1015,7 @@ internal static class ShipRuntimeTranslationHelper
    {
       if( string.IsNullOrWhiteSpace( value ) ) return value;
 
-      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
-      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
-      {
-         return translated;
-      }
-
-      translated = ReplacePrefix( value, "Point of Ref:", "参考点：" );
+      var translated = ReplacePrefix( value, "Point of Ref:", "参考点：" );
       translated = ReplacePrefix( translated, "VREL: ", "相对速度：" );
       translated = ReplacePrefix( translated, "VREL ", "相对速度 " );
       translated = ReplacePrefix( translated, "VCRS ", "横向速度 " );
@@ -801,7 +1025,12 @@ internal static class ShipRuntimeTranslationHelper
       translated = ReplaceExact( translated, "F: Unclaimed", "F: 未认领" );
       translated = ReplaceToken( translated, "RNG ", "距离 " );
 
-      return translated;
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      return RuntimeTextHookHelper.TranslateTextValue( value, hookName );
    }
 
    private static string ReplaceExact( string value, string source, string replacement )
@@ -842,7 +1071,7 @@ internal static class MessageDisplayRuntimeTranslationHelper
    {
       TranslateStatusMessages( messageDisplay );
       RuntimeTextHookHelper.TranslateHierarchy( RuntimeTextHookHelper.GetGameObject( messageDisplay ), "GUIMessageDisplay" );
-      RuntimeHookTranslationHelper.TranslateTextComponentField( messageDisplay, "txtStatus", "GUIMessageDisplay.txtStatus" );
+      TranslateRenderedStatusText( messageDisplay );
    }
 
    public static string TranslateStatusText( string value )
@@ -866,6 +1095,68 @@ internal static class MessageDisplayRuntimeTranslationHelper
       return MfdRuntimeTranslationHelper.TranslateDisplayText( translated );
    }
 
+   public static void TranslateMessageObject( object shipMessage )
+   {
+      if( shipMessage == null ) return;
+
+      var textProperty = RuntimeHookTranslationHelper.GetStringProperty( shipMessage.GetType(), "MessageText" );
+      if( textProperty == null ) return;
+
+      var value = textProperty.GetValue( shipMessage ) as string;
+      if( string.IsNullOrWhiteSpace( value ) ) return;
+
+      var translated = TranslateConversationMessageText( value );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         textProperty.SetValue( shipMessage, translated );
+      }
+   }
+
+   public static string TranslateConversationMessageText( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, "GUIMessageDisplay.MessageText" );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      translated = TranslateReadyToProceedText( value );
+      translated = TranslateHailsText( translated );
+      translated = TranslateConversationResidualText( translated );
+      return translated;
+   }
+
+   public static string TranslateRenderedStatusMarkup( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      value = ReplaceStatusToken( value, "<color=green>DONE</color>", "<color=green>完成</color>" );
+      value = ReplaceStatusToken( value, "<color=green>OPERATIONAL</color>", "<color=green>运行正常</color>" );
+      return value;
+   }
+
+   public static void TranslateRenderedStatusText( object messageDisplay )
+   {
+      if( messageDisplay == null ) return;
+
+      var field = messageDisplay.GetType().GetField( "txtStatus", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      var component = field?.GetValue( messageDisplay );
+      if( component == null ) return;
+
+      var textProperty = component.GetType().GetProperty( "text", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      if( textProperty == null || !textProperty.CanRead || !textProperty.CanWrite || textProperty.PropertyType != typeof( string ) ) return;
+
+      if( textProperty.GetValue( component ) is not string value || string.IsNullOrWhiteSpace( value ) ) return;
+
+      var translated = TranslateRenderedStatusMarkup( value );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         textProperty.SetValue( component, translated );
+      }
+   }
+
    private static void TranslateStatusMessages( object messageDisplay )
    {
       if( messageDisplay == null ) return;
@@ -879,6 +1170,52 @@ internal static class MessageDisplayRuntimeTranslationHelper
          values[ i ] = TranslateStatusText( value );
       }
    }
+
+   private static string ReplaceStatusToken( string value, string token, string replacement )
+   {
+      return value.Contains( token, StringComparison.Ordinal )
+         ? value.Replace( token, replacement )
+         : value;
+   }
+
+   private static string TranslateReadyToProceedText( string value )
+   {
+      const string suffix = ", ready to proceed";
+      if( string.Equals( value, "Ready to proceed", StringComparison.Ordinal ) )
+      {
+         return "准备继续";
+      }
+
+      return value.EndsWith( suffix, StringComparison.Ordinal )
+         ? value.Substring( 0, value.Length - suffix.Length ) + "，准备继续"
+         : value;
+   }
+
+   private static string TranslateHailsText( string value )
+   {
+      const string separator = " hails ";
+      var separatorIndex = value.IndexOf( separator, StringComparison.Ordinal );
+      if( separatorIndex < 0 ) return value;
+
+      return value.Substring( 0, separatorIndex ) + " 呼叫 " + value.Substring( separatorIndex + separator.Length );
+   }
+
+   private static string TranslateConversationResidualText( string value )
+   {
+      value = ReplaceExactToken( value, "K-Leg: Port Azikiwe", "K-Leg：阿齐基韦港" );
+      value = ReplaceExactToken( value, "Port Azikiwe", "阿齐基韦港" );
+      value = ReplaceExactToken( value, "阿齐基韦港 这里是", "阿齐基韦港，这里是" );
+      value = ReplaceExactToken( value, "RCS maneuver", "姿控机动" );
+      value = ReplaceExactToken( value, "RCS maneuvers", "姿控机动" );
+      return value;
+   }
+
+   private static string ReplaceExactToken( string value, string source, string replacement )
+   {
+      return value.Contains( source, StringComparison.Ordinal )
+         ? value.Replace( source, replacement )
+         : value;
+   }
 }
 
 internal static class ReservesRuntimeTranslationHelper
@@ -887,20 +1224,86 @@ internal static class ReservesRuntimeTranslationHelper
    {
       if( string.IsNullOrWhiteSpace( value ) ) return value;
 
-      var translated = RuntimeTextHookHelper.TranslateTextValue( value, "NavModReserves.UpdateUI.txtFuel" );
-      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      var translated = ReplaceToken( value, "DELTA-V: ", "速度增量：" );
+      translated = ReplaceToken( translated, "FUEL: ", "燃料：" );
+      translated = ReplaceToken( translated, "LOW", "低" );
+      return string.Equals( translated, value, StringComparison.Ordinal )
+         ? RuntimeTextHookHelper.TranslateTextValue( value, "NavModReserves.UpdateUI.txtFuel" )
+         : translated;
+   }
+
+   private static string ReplaceToken( string value, string token, string replacement )
+   {
+      var index = value.IndexOf( token, StringComparison.Ordinal );
+      if( index < 0 ) return value;
+
+      return value.Substring( 0, index ) + replacement + value.Substring( index + token.Length );
+   }
+}
+
+internal static class MooringRuntimeTranslationHelper
+{
+   public static string TranslateTargetStatusText( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = ReplaceToken( value, ">VALID<", ">有效<" );
+      translated = ReplaceToken( translated, ">INVALID<", ">无效<" );
+
+      return string.Equals( translated, value, StringComparison.Ordinal )
+         ? RuntimeTextHookHelper.TranslateTextValue( value, "NavModMooringControl.UpdateText.txtTargetStatus" )
+         : translated;
+   }
+
+   private static string ReplaceToken( string value, string token, string replacement )
+   {
+      var index = value.IndexOf( token, StringComparison.Ordinal );
+      if( index < 0 ) return value;
+
+      return value.Substring( 0, index ) + replacement + value.Substring( index + token.Length );
+   }
+}
+
+internal static class DockingRuntimeTranslationHelper
+{
+   public static string TranslateZoomRangeText( string value )
+   {
+      return value.StartsWith( "ZOOM RANGE: ", StringComparison.Ordinal )
+         ? "缩放范围：" + value.Substring( "ZOOM RANGE: ".Length )
+         : value;
+   }
+
+   public static string TranslateDockTelemetryText( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      if( string.Equals( value, "No Target Selected", StringComparison.Ordinal ) )
       {
-         return translated;
+         return "未选择目标";
       }
 
-      if( value.StartsWith( "FUEL: ", StringComparison.Ordinal ) )
+      var translated = value;
+      translated = ReplaceLinePrefix( translated, "RNG ", "距离 " );
+      translated = ReplaceLinePrefix( translated, "ETA ", "预计到达 " );
+      translated = ReplaceLinePrefix( translated, "VCRS ", "横向速度 " );
+      translated = ReplaceLinePrefix( translated, "BRG ", "方位 " );
+      return translated;
+   }
+
+   private static string ReplaceLinePrefix( string value, string sourcePrefix, string replacementPrefix )
+   {
+      if( value.StartsWith( sourcePrefix, StringComparison.Ordinal ) )
       {
-         return "燃料：" + value.Substring( "FUEL: ".Length );
+         value = replacementPrefix + value.Substring( sourcePrefix.Length );
       }
 
-      if( value.StartsWith( "DELTA-V: ", StringComparison.Ordinal ) )
+      var token = "\n" + sourcePrefix;
+      var replacement = "\n" + replacementPrefix;
+      var index = value.IndexOf( token, StringComparison.Ordinal );
+      while( index >= 0 )
       {
-         return "速度增量：" + value.Substring( "DELTA-V: ".Length );
+         value = value.Substring( 0, index ) + replacement + value.Substring( index + token.Length );
+         index = value.IndexOf( token, index + replacement.Length, StringComparison.Ordinal );
       }
 
       return value;
@@ -1134,7 +1537,6 @@ internal static class GUIOrbitDraw_Init_Hook
    {
       RuntimeTextHookHelper.TranslateHierarchy( RuntimeTextHookHelper.GetGameObject( __instance ), "GUIOrbitDraw.Init" );
       NavStationRuntimeTranslationHelper.TranslateNavStationUi( "GUIOrbitDraw.Init.goLines" );
-      RuntimeTextRescanner.ForceScanAll();
    }
 }
 
@@ -1153,7 +1555,7 @@ internal static class GUIOrbitDraw_UpdateUIs_Hook
 
    private static void Postfix( object __instance )
    {
-      RuntimeHookTranslationHelper.TranslateTextComponentField( __instance, "txtRange", "GUIOrbitDraw.UpdateUIs" );
+      RuntimeHookTranslationHelper.TranslateTextComponentField( __instance, "txtRange", DockingRuntimeTranslationHelper.TranslateZoomRangeText );
    }
 }
 
@@ -1181,10 +1583,10 @@ internal static class GUIMFDDisplay_ShowMenu_Hook
       RuntimeHookTranslationHelper.TranslateStringField( mfdDto, "Title", MfdRuntimeTranslationHelper.TranslateDisplayText );
       RuntimeHookTranslationHelper.TranslateStringList( mfdDto, "Left", MfdRuntimeTranslationHelper.TranslateDisplayText );
       RuntimeHookTranslationHelper.TranslateStringList( mfdDto, "Right", MfdRuntimeTranslationHelper.TranslateDisplayText );
-      RuntimeHookTranslationHelper.TranslateSidePanelList( mfdDto, "LeftPanelData", "GUIMFDDisplay.ShowMenu" );
-      RuntimeHookTranslationHelper.TranslateSidePanelList( mfdDto, "RightPanelData", "GUIMFDDisplay.ShowMenu" );
-      RuntimeHookTranslationHelper.TranslateSidePanelList( mfdDto, "TopPanelData", "GUIMFDDisplay.ShowMenu" );
-      RuntimeHookTranslationHelper.TranslateSidePanelList( mfdDto, "BottomPanelData", "GUIMFDDisplay.ShowMenu" );
+      RuntimeHookTranslationHelper.TranslateSidePanelList( mfdDto, "LeftPanelData", MfdRuntimeTranslationHelper.TranslateDisplayText );
+      RuntimeHookTranslationHelper.TranslateSidePanelList( mfdDto, "RightPanelData", MfdRuntimeTranslationHelper.TranslateDisplayText );
+      RuntimeHookTranslationHelper.TranslateSidePanelList( mfdDto, "TopPanelData", MfdRuntimeTranslationHelper.TranslateDisplayText );
+      RuntimeHookTranslationHelper.TranslateSidePanelList( mfdDto, "BottomPanelData", MfdRuntimeTranslationHelper.TranslateDisplayText );
    }
 }
 
@@ -1568,7 +1970,13 @@ internal static class NavModMooringControl_UpdateText_Hook
 
    private static void Postfix( object __instance )
    {
-      RuntimeHookTranslationHelper.TranslateTextComponentField( __instance, "txtTargetStatus", "NavModMooringControl.UpdateText" );
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "txtTargetStatus", MooringRuntimeTranslationHelper.TranslateTargetStatusText );
+
+      var tetherField = __instance == null ? null : RuntimeHookTranslationHelper.GetInstanceField( __instance.GetType(), "goTether" );
+      if( tetherField?.GetValue( __instance ) is UnityEngine.GameObject tetherGameObject )
+      {
+         RuntimeTextHookHelper.TranslateHierarchyIfChanged( tetherGameObject, "NavModMooringControl.goTether" );
+      }
    }
 }
 
@@ -1634,8 +2042,8 @@ internal static class GUIDockSys_SetUI_Hook
 
    private static void Postfix( object __instance )
    {
-      RuntimeHookTranslationHelper.TranslateTextComponentField( __instance, "txtRNGETA", "GUIDockSys.SetUI" );
-      RuntimeHookTranslationHelper.TranslateTextComponentField( __instance, "txtBRGVCRS", "GUIDockSys.SetUI" );
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "txtRNGETA", DockingRuntimeTranslationHelper.TranslateDockTelemetryText );
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "txtBRGVCRS", DockingRuntimeTranslationHelper.TranslateDockTelemetryText );
    }
 }
 
@@ -1654,15 +2062,7 @@ internal static class NavModReserves_UpdateUI_Hook
 
    private static void Postfix( object __instance )
    {
-      var field = __instance?.GetType().GetField( "txtFuel", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
-      var component = field?.GetValue( __instance );
-      if( component == null ) return;
-
-      var textProperty = component.GetType().GetProperty( "text", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
-      if( textProperty == null || !textProperty.CanRead || !textProperty.CanWrite || textProperty.PropertyType != typeof( string ) ) return;
-
-      var value = textProperty.GetValue( component ) as string;
-      textProperty.SetValue( component, ReservesRuntimeTranslationHelper.TranslateFuelText( value ) );
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "txtFuel", ReservesRuntimeTranslationHelper.TranslateFuelText );
    }
 }
 
@@ -1945,6 +2345,204 @@ internal static class NavModControlToggle_ToggleNavMode_Hook
    private static void Postfix()
    {
       NavStationRuntimeTranslationHelper.TranslateNavStationUi( "NavModControlToggle.ToggleNavMode" );
+      NavStationRuntimeTranslationHelper.TranslateNavModeLabel();
+   }
+}
+
+internal static class InfoRuntimeTranslationHelper
+{
+   public static void TranslateNodeData( object info, string hookName )
+   {
+      if( info == null ) return;
+
+      var mapNodes = RuntimeHookTranslationHelper.GetInstanceField( info.GetType(), "mapNodes" )?.GetValue( info ) as IDictionary;
+      if( mapNodes == null ) return;
+
+      foreach( DictionaryEntry entry in mapNodes )
+      {
+         TranslateNodeEntryData( entry.Value, hookName );
+      }
+   }
+
+   public static void TranslateDisplayedNode( object info, string hookName )
+   {
+      if( info == null ) return;
+
+      RuntimeHookTranslationHelper.TranslateTextComponentField( info, "mainWindowTitle", value => RuntimeTextHookHelper.TranslateTextValue( value, hookName + ".mainWindowTitle" ) );
+      RuntimeHookTranslationHelper.TranslateTextComponentField( info, "mainWindowBodyText", value => RuntimeTextHookHelper.TranslateTextValue( value, hookName + ".mainWindowBodyText" ) );
+      RefreshMainWindowLayout( info );
+   }
+
+   public static void TranslateInfoHierarchy( string hookName )
+   {
+      var infoInstance = GetInfoInstance();
+      if( infoInstance == null ) return;
+
+      RuntimeTextHookHelper.TranslateObjectHierarchy( infoInstance, hookName );
+   }
+
+   private static void TranslateNodeEntryData( object node, string hookName )
+   {
+      if( node == null ) return;
+
+      RuntimeHookTranslationHelper.TranslateStringField( node, "label", value => RuntimeTextHookHelper.TranslateTextValue( value, hookName + ".label" ) );
+
+      var mainWindowData = RuntimeHookTranslationHelper.GetInstanceField( node.GetType(), "mainWindowData" )?.GetValue( node );
+      if( mainWindowData == null ) return;
+
+      RuntimeHookTranslationHelper.TranslateStringField( mainWindowData, "title", value => RuntimeTextHookHelper.TranslateTextValue( value, hookName + ".title" ) );
+      RuntimeHookTranslationHelper.TranslateStringField( mainWindowData, "body", value => RuntimeTextHookHelper.TranslateTextValue( value, hookName + ".body" ) );
+   }
+
+   private static UnityEngine.Object GetInfoInstance()
+   {
+      var infoType = GameTypeResolver.Get( "Info" );
+      return infoType?.GetField( "instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic )?.GetValue( null ) as UnityEngine.Object;
+   }
+
+   private static void RefreshMainWindowLayout( object info )
+   {
+      RefreshBodyLayout( info );
+      info.GetType().GetMethod( "RepositionTitle", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic )?.Invoke( info, null );
+      info.GetType().GetMethod( "RepositionTitleBG", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic )?.Invoke( info, null );
+   }
+
+   private static void RefreshBodyLayout( object info )
+   {
+      var bodyComponent = RuntimeHookTranslationHelper.GetInstanceField( info.GetType(), "mainWindowBodyText" )?.GetValue( info );
+      if( bodyComponent == null ) return;
+
+      bodyComponent.GetType().GetMethod( "ForceMeshUpdate", new[] { typeof( bool ), typeof( bool ) } )?.Invoke( bodyComponent, new object[] { false, false } );
+
+      var rectTransform = bodyComponent.GetType().GetProperty( "rectTransform", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic )?.GetValue( bodyComponent );
+      var preferredHeight = bodyComponent.GetType().GetProperty( "preferredHeight", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic )?.GetValue( bodyComponent );
+      if( rectTransform != null && preferredHeight is float height )
+      {
+         var axisType = rectTransform.GetType().Assembly.GetType( "UnityEngine.RectTransform+Axis", false );
+         var setSizeMethod = rectTransform.GetType().GetMethod( "SetSizeWithCurrentAnchors", axisType == null ? null : new[] { axisType, typeof( float ) } );
+         var verticalAxis = axisType == null ? 1 : Enum.ToObject( axisType, 1 );
+         setSizeMethod?.Invoke( rectTransform, new[] { verticalAxis, (object)height } );
+         RuntimeHookTranslationHelper.GetInstanceField( info.GetType(), "lastBodyTextPreferredHeight" )?.SetValue( info, height );
+      }
+
+      var bodyScrollBar = RuntimeHookTranslationHelper.GetInstanceField( info.GetType(), "bodyScrollBar" )?.GetValue( info );
+      bodyScrollBar?.GetType().GetMethod( "AfterNewTextDraw", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic )?.Invoke( bodyScrollBar, null );
+   }
+}
+
+[HarmonyPatch]
+internal static class MainMenuRuntimeTranslationHelper
+{
+   private static readonly Dictionary<int, int> PendingRescans = new Dictionary<int, int>();
+   private const int StartupWarmupTicks = 180;
+
+   public static void TranslateNow( object mainMenu, string hookName )
+   {
+      if( mainMenu == null ) return;
+
+      TranslateMainMenu( mainMenu, hookName );
+   }
+
+   public static void QueueMainMenuRescan( object mainMenu )
+   {
+      if( mainMenu == null ) return;
+
+      var instanceId = RuntimeHelpers.GetHashCode( mainMenu );
+      TranslateMainMenu( mainMenu, "MainMenu.Init" );
+      if( HasInfoInstance() ) PendingRescans.Remove( instanceId );
+      else PendingRescans[ instanceId ] = 1;
+   }
+
+   public static void Tick( object mainMenu )
+   {
+      if( mainMenu == null ) return;
+
+      var instanceId = RuntimeHelpers.GetHashCode( mainMenu );
+      if( !PendingRescans.TryGetValue( instanceId, out var remainingTicks ) )
+      {
+         remainingTicks = StartupWarmupTicks;
+      }
+
+      TranslateMainMenu( mainMenu, "MainMenu.Deferred" );
+      remainingTicks--;
+      if( remainingTicks <= 0 )
+      {
+         PendingRescans.Remove( instanceId );
+         return;
+      }
+
+      PendingRescans[ instanceId ] = remainingTicks;
+   }
+
+   private static void TranslateMainMenu( object mainMenu, string hookName )
+   {
+      RuntimeTextHookHelper.TranslateHierarchy( RuntimeTextHookHelper.GetGameObject( mainMenu ), hookName );
+      InfoRuntimeTranslationHelper.TranslateInfoHierarchy( hookName + ".Info" );
+   }
+
+   private static bool HasInfoInstance()
+   {
+      var infoType = GameTypeResolver.Get( "Info" );
+      return infoType?.GetField( "instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic )?.GetValue( null ) != null;
+   }
+}
+
+[HarmonyPatch]
+internal static class Info_Init_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Info" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "Info" ), "Init", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      InfoRuntimeTranslationHelper.TranslateNodeData( __instance, "Info.Init" );
+      InfoRuntimeTranslationHelper.TranslateDisplayedNode( __instance, "Info.Init" );
+      InfoRuntimeTranslationHelper.TranslateInfoHierarchy( "Info.Init.Hierarchy" );
+   }
+}
+
+[HarmonyPatch]
+internal static class MainMenu_Awake_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "MainMenu" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "MainMenu" ), "Awake", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      MainMenuRuntimeTranslationHelper.TranslateNow( __instance, "MainMenu.Awake" );
+   }
+}
+
+[HarmonyPatch]
+internal static class MainMenu_Init_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "MainMenu" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "MainMenu" ), "Init", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      MainMenuRuntimeTranslationHelper.QueueMainMenuRescan( __instance );
    }
 }
 
@@ -1963,8 +2561,125 @@ internal static class MainMenu_Start_Hook
 
    private static void Postfix( object __instance )
    {
-      RuntimeTextHookHelper.TranslateHierarchy( RuntimeTextHookHelper.GetGameObject( __instance ), "MainMenu.Start" );
-      RuntimeTextRescanner.ForceScanAll();
+      MainMenuRuntimeTranslationHelper.TranslateNow( __instance, "MainMenu.Start" );
+   }
+}
+
+[HarmonyPatch]
+internal static class MainMenu_RestartLoop_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "MainMenu" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "MainMenu" ), "RestartLoop", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      MainMenuRuntimeTranslationHelper.TranslateNow( __instance, "MainMenu.RestartLoop" );
+   }
+}
+
+[HarmonyPatch]
+internal static class MainMenu_Update_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "MainMenu" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "MainMenu" ), "Update", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      MainMenuRuntimeTranslationHelper.Tick( __instance );
+   }
+}
+
+[HarmonyPatch]
+internal static class Info_DrawMainWindow_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Info" ) != null && GameTypeResolver.Get( "InfoNode" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "Info" ), "DrawMainWindow", new[] { GameTypeResolver.Get( "InfoNode" ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      InfoRuntimeTranslationHelper.TranslateDisplayedNode( __instance, "Info.DrawMainWindow" );
+   }
+}
+
+internal static class RotateCommandRuntimeGuardHelper
+{
+   public static bool ShouldSkipExecute()
+   {
+      var canvasManagerType = GameTypeResolver.Get( "CanvasManager" );
+      var crewSimType = GameTypeResolver.Get( "CrewSim" );
+
+      if( canvasManagerType == null || crewSimType == null ) return false;
+
+      var canvasManager = canvasManagerType.GetField( "instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic )?.GetValue( null );
+      if( canvasManager == null ) return true;
+
+      var crewCanvasManager = crewSimType.GetField( "CanvasManager", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic )?.GetValue( null );
+      if( crewCanvasManager == null ) return true;
+
+      var shipCurrentLoaded = crewSimType.GetField( "shipCurrentLoaded", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic )?.GetValue( null );
+      if( shipCurrentLoaded == null ) return true;
+
+      var crewSimInstance = crewSimType.GetField( "objInstance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic )?.GetValue( null );
+      return crewSimInstance == null;
+   }
+}
+
+[HarmonyPatch]
+internal static class CommandRotateCCW_Execute_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.InputControl.CommandRotateCCW" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "Ostranauts.InputControl.CommandRotateCCW" ), "Execute" );
+   }
+
+   private static bool Prefix()
+   {
+      return !RotateCommandRuntimeGuardHelper.ShouldSkipExecute();
+   }
+}
+
+[HarmonyPatch]
+internal static class CommandRotateCW_Execute_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.InputControl.CommandRotateCW" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "Ostranauts.InputControl.CommandRotateCW" ), "Execute" );
+   }
+
+   private static bool Prefix()
+   {
+      return !RotateCommandRuntimeGuardHelper.ShouldSkipExecute();
    }
 }
 
@@ -2012,6 +2727,62 @@ internal static class GUIMessageDisplay_ShowPanel_Hook
    private static void Postfix( object __instance )
    {
       MessageDisplayRuntimeTranslationHelper.TranslateUi( __instance );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIMessageDisplay_AddMessage_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.ShipGUIs.NavStation.GUIMessageDisplay" ) != null
+         && GameTypeResolver.Get( "Ostranauts.Ships.Comms.ShipMessage" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "Ostranauts.ShipGUIs.NavStation.GUIMessageDisplay" ),
+         "AddMessage",
+         new[] { GameTypeResolver.Get( "Ostranauts.Ships.Comms.ShipMessage" ) } );
+   }
+
+   private static void Prefix( object __0 )
+   {
+      MessageDisplayRuntimeTranslationHelper.TranslateMessageObject( __0 );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIMessageDisplay_RedrawStatus_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.ShipGUIs.NavStation.GUIMessageDisplay" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "Ostranauts.ShipGUIs.NavStation.GUIMessageDisplay" ),
+         "RedrawStatus",
+         new[] { typeof( List<string> ) } );
+   }
+
+   private static void Prefix( object __0 )
+   {
+      if( __0 is not IList values ) return;
+
+      for( var i = 0; i < values.Count; i++ )
+      {
+         if( values[ i ] is not string value ) continue;
+         values[ i ] = MessageDisplayRuntimeTranslationHelper.TranslateRenderedStatusMarkup( value );
+      }
+   }
+
+   private static void Postfix( object __instance )
+   {
+      MessageDisplayRuntimeTranslationHelper.TranslateRenderedStatusText( __instance );
    }
 }
 

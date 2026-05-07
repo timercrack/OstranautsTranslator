@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using OstranautsTranslator.Core;
+using OstranautsTranslator.Core.Processing;
+using OstranautsTranslator.Tool;
 using OstranautsTranslator.Tool.Processing;
 using OstranautsTranslator.Tool.Scanning;
 
@@ -9,7 +11,7 @@ namespace OstranautsTranslator.Tool.Database;
 
 internal sealed class CorpusDatabase
 {
-   private const int SchemaVersion = 7;
+   private const int SchemaVersion = 8;
    private const string IgnoredNativeModSourceKeyPrefix = "native-ignore::";
    private readonly string _databasePath;
 
@@ -58,8 +60,10 @@ DROP TABLE IF EXISTS runtime_captures;
          command.ExecuteNonQuery();
       }
 
-   EnsureNativeModSourceColumns( connection );
-   EnsureRuntimeSourceColumns( connection );
+      EnsureNativeModSourceColumns( connection );
+      EnsureRuntimeSourceColumns( connection );
+      RuntimeFixedSourceSeeder.EnsureSourceTable( connection );
+      RuntimeFixedSourceSeeder.SyncSources( connection );
 
       using( var indexCommand = connection.CreateCommand() )
       {
@@ -129,6 +133,11 @@ CREATE INDEX IF NOT EXISTS ix_runtime_source_origin_state ON runtime_source(sour
 
       foreach( var row in runtimeRows.Values )
       {
+         if( MalformedRichTextDetector.LooksMalformed( row.RawText ) )
+         {
+            continue;
+         }
+
          UpsertRuntimeScanRow( connection, transaction, row, scanToken );
       }
 
@@ -146,6 +155,8 @@ FROM (
    SELECT source_key FROM native_mod_source WHERE state = 'active'
    UNION
    SELECT source_key FROM runtime_source WHERE state = 'active'
+   UNION
+   SELECT source_key FROM runtime_fixed_source WHERE state = 'active'
 );";
       return Convert.ToInt64( command.ExecuteScalar(), CultureInfo.InvariantCulture );
    }
@@ -384,6 +395,7 @@ ON CONFLICT(source_key) DO UPDATE SET
       {
          "native_mod" => "native_mod_source",
          "runtime" => "runtime_source",
+         RuntimeFixedSourceSeeder.SourceKind => RuntimeFixedSourceSeeder.SourceTableName,
          _ => throw new InvalidOperationException( $"Unsupported source kind '{sourceKind}'." ),
       };
    }
@@ -421,7 +433,7 @@ CREATE TABLE IF NOT EXISTS schema_meta (
       if( string.IsNullOrWhiteSpace( currentSchemaVersion ) ) return;
 
       if( int.TryParse( currentSchemaVersion, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedVersion )
-         && parsedVersion is 5 or 6 or 7 )
+         && parsedVersion is 5 or 6 or 7 or 8 )
       {
          return;
       }

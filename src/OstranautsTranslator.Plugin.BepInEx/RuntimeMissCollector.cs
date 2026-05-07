@@ -3,6 +3,8 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Collections.Generic;
 using BepInEx.Logging;
 using Microsoft.Data.Sqlite;
 using OstranautsTranslator.Core;
@@ -12,6 +14,46 @@ namespace OstranautsTranslator.Plugin.BepInEx;
 
 internal sealed class RuntimeMissCollector
 {
+   private const string IgnoredMalformedRichTextState = "ignored-malformed-richtext";
+   private const string RichTextTagPattern = @"align|alpha|b|cspace|color|font|i|indent|line-height|line-indent|link|lowercase|margin(?:-left|-right)?|mark|mspace|nobr|noparse|pos|rotate|s|size|smallcaps|space|sprite|sub|sup|u|uppercase|voffset|width";
+   private static readonly Regex RichTextTagRegex = new Regex(
+      @"<\s*/?\s*(?:" + RichTextTagPattern + @")(?:\s*=[^<>]*)?\s*>",
+      RegexOptions.Compiled | RegexOptions.IgnoreCase );
+   private static readonly Regex RichTextTagTokenRegex = new Regex(
+      @"<\s*(/?)\s*(" + RichTextTagPattern + @")(?:\s*=[^<>]*)?\s*>",
+      RegexOptions.Compiled | RegexOptions.IgnoreCase );
+   private static readonly Regex BrokenBoundaryRichTextTagRegex = new Regex(
+      @"(?:^|[\r\n])\s*(?:/\s*)?(?:" + RichTextTagPattern + @")(?:\s*=[^<>\r\n]*)?>",
+      RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline );
+   private static readonly Regex BrokenTrailingRichTextTagRegex = new Regex(
+      @"</\s*(?:" + RichTextTagPattern + @")\s*$",
+      RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline );
+   private static readonly Regex IncompleteOpeningRichTextTagRegex = new Regex(
+      @"<\s*/?\s*(?:" + RichTextTagPattern + @")[^>\r\n]*$",
+      RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline );
+   private static readonly Regex BrokenInlineClosingRichTextTagRegex = new Regex(
+      @"(?:^|[^<])/(?:" + RichTextTagPattern + @")\s*$",
+      RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline );
+   private static readonly HashSet<string> SelfContainedRichTextTags = new HashSet<string>( StringComparer.OrdinalIgnoreCase )
+   {
+      "sprite",
+      "space",
+      "cspace",
+      "voffset",
+      "pos",
+      "width",
+      "margin",
+      "margin-left",
+      "margin-right",
+      "indent",
+      "line-indent",
+      "line-height",
+      "rotate",
+      "mark",
+      "noparse",
+      "nobr",
+      "mspace",
+   };
    private readonly object _writeSync = new object();
    private readonly ConcurrentDictionary<string, byte> _capturedValues = new ConcurrentDictionary<string, byte>( StringComparer.Ordinal );
    private readonly ManualLogSource _logger;
@@ -36,6 +78,11 @@ internal sealed class RuntimeMissCollector
          {
             using var connection = OpenConnection( databasePath );
             EnsureRuntimeSourceTable( connection );
+            var cleanedRows = CleanupMalformedRuntimeSourceEntries( connection );
+            if( cleanedRows > 0 )
+            {
+               _logger.LogInfo( $"Marked {cleanedRows} malformed rich-text runtime_source rows as '{IgnoredMalformedRichTextState}'." );
+            }
          }
          catch( Exception e )
          {
@@ -52,6 +99,11 @@ internal sealed class RuntimeMissCollector
       }
 
       if( RuntimeVolatileTextDetector.LooksVolatile( value, configuration ) )
+      {
+         return false;
+      }
+
+      if( MalformedRichTextDetector.LooksMalformed( value ) )
       {
          return false;
       }
@@ -126,6 +178,121 @@ ON CONFLICT(source_key) DO UPDATE SET
       var connection = new SqliteConnection( $"Data Source={databasePath}" );
       connection.Open();
       return connection;
+   }
+
+   private static bool LooksLikeBrokenRichTextFragment( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) )
+      {
+         return true;
+      }
+
+      var trimmed = value.Trim();
+      if( trimmed.Length == 0 )
+      {
+         return true;
+      }
+
+      if( BrokenBoundaryRichTextTagRegex.IsMatch( trimmed )
+         || BrokenTrailingRichTextTagRegex.IsMatch( trimmed )
+         || IncompleteOpeningRichTextTagRegex.IsMatch( trimmed )
+         || BrokenInlineClosingRichTextTagRegex.IsMatch( trimmed ) )
+      {
+         return true;
+      }
+
+      if( HasUnbalancedRichTextTags( trimmed ) )
+      {
+         return true;
+      }
+
+      if( trimmed.IndexOf( '<' ) < 0 )
+      {
+         return false;
+      }
+
+      var stripped = RichTextTagRegex.Replace( trimmed, string.Empty ).Trim();
+      return stripped.Length == 0 || stripped.StartsWith( "<", StringComparison.Ordinal ) || stripped.EndsWith( ">", StringComparison.Ordinal );
+   }
+
+   private static bool HasUnbalancedRichTextTags( string value )
+   {
+      var stack = new Stack<string>();
+      var recognizedTagCount = 0;
+
+      foreach( Match match in RichTextTagTokenRegex.Matches( value ) )
+      {
+         if( !match.Success ) continue;
+
+         recognizedTagCount++;
+         var isClosing = string.Equals( match.Groups[ 1 ].Value, "/", StringComparison.Ordinal );
+         var tagName = match.Groups[ 2 ].Value;
+         if( tagName.Length == 0 || SelfContainedRichTextTags.Contains( tagName ) )
+         {
+            continue;
+         }
+
+         if( isClosing )
+         {
+            if( stack.Count == 0 )
+            {
+               return true;
+            }
+
+            var openTagName = stack.Pop();
+            if( !string.Equals( openTagName, tagName, StringComparison.OrdinalIgnoreCase ) )
+            {
+               return true;
+            }
+
+            continue;
+         }
+
+         stack.Push( tagName );
+      }
+
+      return recognizedTagCount > 0 && stack.Count > 0;
+   }
+
+   private static int CleanupMalformedRuntimeSourceEntries( SqliteConnection connection )
+   {
+      var rowIds = new List<long>();
+
+      using( var command = connection.CreateCommand() )
+      {
+         command.CommandText = @"
+SELECT id, raw_text
+FROM runtime_source
+WHERE state = 'active'
+  AND (raw_text LIKE '%<%' OR raw_text LIKE '%>%' OR raw_text LIKE '%/%');";
+
+         using var reader = command.ExecuteReader();
+         while( reader.Read() )
+         {
+            var id = reader.GetInt64( 0 );
+            var rawText = reader.IsDBNull( 1 ) ? string.Empty : reader.GetString( 1 );
+            if( MalformedRichTextDetector.LooksMalformed( rawText ) )
+            {
+               rowIds.Add( id );
+            }
+         }
+      }
+
+      if( rowIds.Count == 0 )
+      {
+         return 0;
+      }
+
+      foreach( var rowId in rowIds )
+      {
+         using var command = connection.CreateCommand();
+         command.CommandText = "UPDATE runtime_source SET state = $state WHERE id = $id;";
+         command.Parameters.AddWithValue( "$state", IgnoredMalformedRichTextState );
+         command.Parameters.AddWithValue( "$id", rowId );
+         command.ExecuteNonQuery();
+      }
+
+      return rowIds.Count;
    }
 
    private static void EnsureRuntimeSourceTable( SqliteConnection connection )

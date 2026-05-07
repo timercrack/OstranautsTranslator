@@ -26,6 +26,7 @@ public static class SqliteTranslationCatalogLoader
       var configuration = LoadConfiguration( connection );
       var translationTable = RuntimeTranslationDeployment.GetTranslationTableName( language );
       var ignoredNativeModSourceLookupKeys = LoadIgnoredNativeModSourceLookupKeys( connection, configuration, translationTable, includeDraft );
+      var hasFixedRuntimeSourceTable = TableExists( connection, "runtime_fixed_source" );
       var translationsByRawText = new Dictionary<string, string>( StringComparer.Ordinal );
       var translationsByRuntimeKey = new Dictionary<string, string>( StringComparer.Ordinal );
       var translationsByRenderKey = new Dictionary<string, string>( StringComparer.Ordinal );
@@ -48,22 +49,7 @@ public static class SqliteTranslationCatalogLoader
       }
 
       using var command = connection.CreateCommand();
-      command.CommandText = includeDraft
-         ? $@"SELECT s.raw_text, t.translated_text
-FROM runtime_source s
-INNER JOIN {translationTable} t ON t.source_kind = 'runtime' AND t.source_id = s.id
-WHERE s.state = 'active'
-   AND t.translated_text IS NOT NULL
-   AND t.translated_text <> ''
-ORDER BY s.occurrence_count DESC, s.id;"
-         : $@"SELECT s.raw_text, t.translated_text
-FROM runtime_source s
-INNER JOIN {translationTable} t ON t.source_kind = 'runtime' AND t.source_id = s.id
-WHERE s.state = 'active'
-   AND t.translation_state = 'final'
-   AND t.translated_text IS NOT NULL
-   AND t.translated_text <> ''
-ORDER BY s.occurrence_count DESC, s.id;";
+      command.CommandText = BuildRuntimeSourceTranslationQuery( translationTable, includeDraft, hasFixedRuntimeSourceTable );
 
       using var reader = command.ExecuteReader();
       while( reader.Read() )
@@ -118,6 +104,39 @@ ORDER BY s.occurrence_count DESC, s.id;";
          loadedTranslationCount,
          runtimeKeyCollisionCount,
          renderKeyCollisionCount );
+   }
+
+   private static string BuildRuntimeSourceTranslationQuery( string translationTable, bool includeDraft, bool hasFixedRuntimeSourceTable )
+   {
+      var draftFilter = includeDraft ? string.Empty : "\n   AND t.translation_state = 'final'";
+      var fixedSourceUnion = hasFixedRuntimeSourceTable
+         ? @"
+
+   UNION ALL
+
+   SELECT
+      'runtime_fixed' AS source_kind,
+      id AS source_id,
+      raw_text,
+      occurrence_count
+   FROM runtime_fixed_source
+   WHERE state = 'active'"
+         : string.Empty;
+
+      return $@"SELECT s.raw_text, t.translated_text
+FROM (
+   SELECT
+      'runtime' AS source_kind,
+      id AS source_id,
+      raw_text,
+      occurrence_count
+   FROM runtime_source
+   WHERE state = 'active'{fixedSourceUnion}
+) s
+INNER JOIN {translationTable} t ON t.source_kind = s.source_kind AND t.source_id = s.source_id
+WHERE t.translated_text IS NOT NULL
+   AND t.translated_text <> ''{draftFilter}
+ORDER BY s.occurrence_count DESC, s.source_kind, s.source_id;";
    }
 
    private static HashSet<string> LoadIgnoredNativeModSourceLookupKeys( DbConnection connection, RuntimeTextProcessingConfiguration configuration, string translationTable, bool includeDraft )

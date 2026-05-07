@@ -10,7 +10,7 @@ namespace OstranautsTranslator.Tool;
 
 internal sealed class TranslationDatabase
 {
-   private const int SchemaVersion = 7;
+   private const int SchemaVersion = 8;
    private readonly string _databasePath;
    private readonly string? _fromLanguage;
    private readonly string? _toLanguage;
@@ -36,6 +36,8 @@ internal sealed class TranslationDatabase
       ThrowIfSchemaVersionIsUnsupported( connection );
       EnsureNativeModSourceColumns( connection );
       EnsureRuntimeSourceColumns( connection );
+      RuntimeFixedSourceSeeder.EnsureSourceTable( connection );
+      RuntimeFixedSourceSeeder.SyncSources( connection );
 
       SetSchemaMeta( connection, "schema_version", SchemaVersion.ToString( CultureInfo.InvariantCulture ) );
       if( !string.IsNullOrWhiteSpace( _fromLanguage ) )
@@ -47,6 +49,7 @@ internal sealed class TranslationDatabase
       {
          SetSchemaMeta( connection, "last_translation_language", _toLanguage );
          EnsureTranslationTable( connection, GetTranslationTableName() );
+         RuntimeFixedSourceSeeder.SeedTranslations( connection, GetTranslationTableName(), _toLanguage );
       }
    }
 
@@ -99,6 +102,8 @@ FROM (
    SELECT id FROM native_mod_source WHERE state = 'active' AND COALESCE(is_translatable, 1) = 1
    UNION ALL
    SELECT id FROM runtime_source WHERE state = 'active'
+   UNION ALL
+   SELECT id FROM runtime_fixed_source WHERE state = 'active'
 );";
       return Convert.ToInt32( command.ExecuteScalar(), CultureInfo.InvariantCulture );
    }
@@ -233,18 +238,28 @@ FROM (
       var translationTable = GetTranslationTableName();
       command.CommandText = $@"
 SELECT
-   s.id,
+   s.source_id,
    s.source_key,
    s.raw_text,
    t.translated_text,
    t.translation_state,
    s.occurrence_count
-FROM runtime_source s
-INNER JOIN {translationTable} t ON t.source_kind = 'runtime' AND t.source_id = s.id
-WHERE s.state = 'active'
+FROM (
+   SELECT 'runtime' AS source_kind, id AS source_id, source_key, raw_text, occurrence_count
+   FROM runtime_source
+   WHERE state = 'active'
+
+   UNION ALL
+
+   SELECT '{RuntimeFixedSourceSeeder.SourceKind}' AS source_kind, id AS source_id, source_key, raw_text, occurrence_count
+   FROM {RuntimeFixedSourceSeeder.SourceTableName}
+   WHERE state = 'active'
+) s
+INNER JOIN {translationTable} t ON t.source_kind = s.source_kind AND t.source_id = s.source_id
+WHERE 1 = 1
   AND t.translated_text IS NOT NULL
   AND t.translated_text <> ''{( includeDraft ? string.Empty : "\n  AND t.translation_state = 'final'" )}
-ORDER BY s.occurrence_count DESC, s.id;";
+ORDER BY s.occurrence_count DESC, s.source_kind, s.source_id;";
 
       using var reader = command.ExecuteReader();
       var results = new List<RuntimeExportRecord>();
@@ -493,6 +508,11 @@ CREATE INDEX IF NOT EXISTS ix_{tableName}_translation_state ON {tableName}(trans
          results.AddRange( QueryTargetsBySourceKey( connection, transaction, "runtime", "runtime_source", sourceKey ) );
       }
 
+      if( string.IsNullOrWhiteSpace( sourceKind ) || string.Equals( sourceKind, RuntimeFixedSourceSeeder.SourceKind, StringComparison.Ordinal ) )
+      {
+         results.AddRange( QueryTargetsBySourceKey( connection, transaction, RuntimeFixedSourceSeeder.SourceKind, RuntimeFixedSourceSeeder.SourceTableName, sourceKey ) );
+      }
+
       return results;
    }
 
@@ -527,6 +547,7 @@ CREATE INDEX IF NOT EXISTS ix_{tableName}_translation_state ON {tableName}(trans
       {
          "native_mod" => "native_mod_source",
          "runtime" => "runtime_source",
+         RuntimeFixedSourceSeeder.SourceKind => RuntimeFixedSourceSeeder.SourceTableName,
          _ => throw new InvalidOperationException( $"Unsupported source kind '{sourceKind}'." ),
       };
 
@@ -653,6 +674,20 @@ FROM (
       source_origin
    FROM runtime_source
    WHERE state = 'active'
+
+   UNION ALL
+
+   SELECT
+      '{RuntimeFixedSourceSeeder.SourceKind}' AS source_kind,
+      id AS source_id,
+      source_key,
+      raw_text,
+      occurrence_count,
+      NULL AS sample_payload_json,
+      NULL AS patch_targets_json,
+      '{RuntimeSourceOrigins.RuntimeFixed}' AS source_origin
+   FROM {RuntimeFixedSourceSeeder.SourceTableName}
+   WHERE state = 'active'
 ) s
 LEFT JOIN {translationTable} t ON t.source_kind = s.source_kind AND t.source_id = s.source_id
 WHERE 1 = 1
@@ -677,7 +712,7 @@ CREATE TABLE IF NOT EXISTS schema_meta (
       if( string.IsNullOrWhiteSpace( currentSchemaVersion ) ) return;
 
       if( int.TryParse( currentSchemaVersion, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedVersion )
-         && parsedVersion is 5 or 6 or 7 )
+         && parsedVersion is 5 or 6 or 7 or 8 )
       {
          return;
       }

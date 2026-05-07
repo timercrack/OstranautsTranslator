@@ -71,76 +71,6 @@ internal static class RuntimeTextHookHelper
 {
    private static readonly BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
    private static readonly ConditionalWeakTable<object, RescanTextState> RescanTextStates = new ConditionalWeakTable<object, RescanTextState>();
-   private static readonly IReadOnlyDictionary<string, string> KnownTextOverrides = new Dictionary<string, string>( StringComparer.Ordinal )
-   {
-      [ "Ostranauts" ] = "星际拾荒者",
-      [ "OSTRANAUTS" ] = "星际拾荒者",
-      [ "RCS" ] = "姿控",
-      [ "OPT" ] = "光学",
-      [ "Signal:" ] = "信号：",
-      [ "SIGNAL:" ] = "信号：",
-      [ "No Target Selected" ] = "未选择目标",
-      [ "DELTA-V:" ] = "速度增量：",
-      [ "Sensors" ] = "传感器",
-      [ "MESCAFORM" ] = "梅斯卡福姆",
-      [ "CHARLIE" ] = "查理",
-      [ "MARTIN" ] = "马丁",
-      [ "CREW ORDERS & BUILDING" ] = "船员指令与建造",
-      [ "EDIT" ] = "编辑",
-      [ "PAUSE" ] = "暂停",
-      [ "AUTOTASK" ] = "自动任务",
-      [ "AUTOPAUSE" ] = "自动暂停",
-      [ "TOGGLE AFFECTED ITEM TYPE(S)" ] = "切换受影响物品类型",
-      [ "TIME / ZOOM" ] = "时间 / 缩放",
-      [ "QUICK ZOOM" ] = "快速缩放",
-      [ "ZOOM RANGE:" ] = "缩放范围：",
-      [ "RESET" ] = "重置",
-      [ "REV" ] = "倒退",
-      [ "FWD" ] = "前进",
-      [ "PLA" ] = "行星",
-      [ "INR" ] = "内圈",
-      [ "OUT" ] = "外圈",
-      [ "SHOW ZONES" ] = "显示区域",
-      [ "NO WAKE ZONES" ] = "无尾流区",
-      [ "DISPLAY CONTROLS" ] = "显示控制",
-      [ "TRACKING MODE" ] = "跟踪模式",
-      [ "SHIP LABELS" ] = "船只标签",
-      [ "FOCUS" ] = "焦点",
-      [ "NAV MODE" ] = "导航模式",
-      [ "NAV MODE: PAN" ] = "导航模式：平移",
-      [ "NAV MODE: RCS" ] = "导航模式：RCS",
-      [ "NAV CONTROLS" ] = "导航控制",
-      [ "COMMS CONTROLS" ] = "通讯控制",
-      [ "MAP CONTROLS" ] = "地图控制",
-      [ "RCS MANEUVERS" ] = "RCS机动",
-      [ "RESERVES" ] = "储备",
-      [ "TARGET DATA" ] = "目标数据",
-      [ "MAP" ] = "地图",
-      [ "TRANSPONDER/IFF" ] = "应答机/敌我识别",
-      [ "Mooring Control" ] = "系泊控制",
-      [ "STATUS:" ] = "状态：",
-      [ "INVALID" ] = "无效",
-      [ "FUEL:" ] = "燃料：",
-      [ "POWER:" ] = "电力：",
-      [ "TARGET" ] = "目标",
-      [ "VALID" ] = "有效",
-      [ "POINT OF REF:" ] = "参考点：",
-      [ "PORT-AZIKIWE - CHARLIE - MARTIN" ] = "阿齐基韦港 - 查理 - 马丁",
-      [ "WALL" ] = "墙体",
-      [ "FLOOR" ] = "地板",
-      [ "CONDUIT" ] = "导管",
-      [ "CAN" ] = "容器",
-      [ "EQUIP" ] = "装备",
-      [ "LOOSE" ] = "散放",
-      [ "HULL" ] = "船体",
-      [ "HVAC" ] = "暖通",
-      [ "POWR" ] = "电力",
-      [ "SENS" ] = "传感",
-      [ "CTRL" ] = "控制",
-      [ "FURN" ] = "家具",
-      [ "APPS" ] = "设备",
-      [ "MISC" ] = "其他",
-   };
 
    public static void TranslateCurrentText( object instance, string hookName )
    {
@@ -209,11 +139,6 @@ internal static class RuntimeTextHookHelper
       if( !string.Equals( translated, value, StringComparison.Ordinal ) )
       {
          return translated;
-      }
-
-      if( KnownTextOverrides.TryGetValue( value, out var overrideText ) )
-      {
-         return overrideText;
       }
 
       foreach( var candidate in EnumerateCaseVariants( value ) )
@@ -344,6 +269,22 @@ internal static class RuntimeTextHookHelper
       }
    }
 
+   public static void TranslateHierarchyIfChanged( GameObject root, string hookName )
+   {
+      if( root == null ) return;
+
+      var getComponentsInChildren = typeof( GameObject ).GetMethod( "GetComponentsInChildren", new[] { typeof( Type ), typeof( bool ) } );
+      if( getComponentsInChildren == null ) return;
+
+      if( getComponentsInChildren.Invoke( root, new object[] { typeof( Component ), true } ) is not IEnumerable components ) return;
+
+      foreach( var component in components )
+      {
+         if( component == null ) continue;
+         TranslateCurrentTextIfChanged( component, hookName + "." + component.GetType().Name );
+      }
+   }
+
    public static void TranslateObjectHierarchy( UnityEngine.Object target, string hookName )
    {
       switch( target )
@@ -353,6 +294,19 @@ internal static class RuntimeTextHookHelper
             break;
          case Component component:
             TranslateHierarchy( GetGameObject( component ), hookName );
+            break;
+      }
+   }
+
+   public static void TranslateObjectHierarchyIfChanged( UnityEngine.Object target, string hookName )
+   {
+      switch( target )
+      {
+         case GameObject gameObject:
+            TranslateHierarchyIfChanged( gameObject, hookName );
+            break;
+         case Component component:
+            TranslateHierarchyIfChanged( GetGameObject( component ), hookName );
             break;
       }
    }

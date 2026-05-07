@@ -30,6 +30,9 @@
         <None Include="..\..\tmp\generate_generic_glossary.py"
             Link="generate_generic_glossary.py"
             CopyToOutputDirectory="PreserveNewest" />
+        <None Include="..\..\runtime-fixed-source.json"
+            Link="runtime-fixed-source.json"
+            CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
     <Target Name="CopyTranslatorPackageToGameRoot" AfterTargets="Build"

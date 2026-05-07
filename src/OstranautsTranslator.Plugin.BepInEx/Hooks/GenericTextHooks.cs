@@ -95,7 +95,7 @@ internal static class TMP_Text_SetCharArray_Hook1
 
    private static void Prefix( ref char[] chars )
    {
-      RuntimeTextHookHelper.TranslateCharArray( ref chars, "TMP_Text.SetCharArray(char[])" );
+      // TMP frequently reuses internal buffers here. Translate the finalized text in Postfix instead.
    }
 
    private static void Postfix( object __instance )
@@ -119,7 +119,7 @@ internal static class TMP_Text_SetCharArray_Hook2
 
    private static void Prefix( ref char[] chars, ref int start, ref int length )
    {
-      RuntimeTextHookHelper.TranslateCharArraySegment( ref chars, ref start, ref length, "TMP_Text.SetCharArray(char[],int,int)" );
+      // TMP passes array slices here; translating the slice corrupts rich-text boundaries.
    }
 
    private static void Postfix( object __instance )
@@ -143,7 +143,7 @@ internal static class TMP_Text_SetCharArray_Hook3
 
    private static void Prefix( ref int[] chars, ref int start, ref int length )
    {
-      RuntimeTextHookHelper.TranslateIntArraySegment( ref chars, ref start, ref length, "TMP_Text.SetCharArray(int[],int,int)" );
+      // TMP passes array slices here; translating the slice corrupts rich-text boundaries.
    }
 
    private static void Postfix( object __instance )
@@ -625,7 +625,7 @@ internal static class Transform_SetParent_Hook
    {
       if( __instance is Component component )
       {
-         RuntimeTextHookHelper.TranslateHierarchy( RuntimeTextHookHelper.GetGameObject( component ), "Transform.SetParent" );
+         RuntimeTextHookHelper.TranslateHierarchyIfChanged( RuntimeTextHookHelper.GetGameObject( component ), "Transform.SetParent" );
       }
    }
 }
@@ -642,7 +642,7 @@ internal static class GameObject_Internal_AddComponentWithType_Hook
    {
       if( __result != null )
       {
-         RuntimeTextHookHelper.TranslateObjectHierarchy( __result, "GameObject.Internal_AddComponentWithType" );
+         RuntimeTextHookHelper.TranslateObjectHierarchyIfChanged( __result, "GameObject.Internal_AddComponentWithType" );
       }
    }
 }
@@ -667,7 +667,7 @@ internal static class Object_Internal_InstantiateSingle_Hook
 
    private static void Postfix( UnityEngine.Object __result )
    {
-      RuntimeTextHookHelper.TranslateObjectHierarchy( __result, "Object.Internal_InstantiateSingle" );
+      RuntimeTextHookHelper.TranslateObjectHierarchyIfChanged( __result, "Object.Internal_InstantiateSingle" );
    }
 }
 
@@ -693,7 +693,7 @@ internal static class Object_Internal_InstantiateSingleWithParent_Hook
 
    private static void Postfix( UnityEngine.Object __result )
    {
-      RuntimeTextHookHelper.TranslateObjectHierarchy( __result, "Object.Internal_InstantiateSingleWithParent" );
+      RuntimeTextHookHelper.TranslateObjectHierarchyIfChanged( __result, "Object.Internal_InstantiateSingleWithParent" );
    }
 }
 
@@ -712,7 +712,7 @@ internal static class Object_Internal_CloneSingle_Hook
 
    private static void Postfix( UnityEngine.Object __result )
    {
-      RuntimeTextHookHelper.TranslateObjectHierarchy( __result, "Object.Internal_CloneSingle" );
+      RuntimeTextHookHelper.TranslateObjectHierarchyIfChanged( __result, "Object.Internal_CloneSingle" );
    }
 }
 
@@ -733,6 +733,6 @@ internal static class Object_Internal_CloneSingleWithParent_Hook
 
    private static void Postfix( UnityEngine.Object __result )
    {
-      RuntimeTextHookHelper.TranslateObjectHierarchy( __result, "Object.Internal_CloneSingleWithParent" );
+      RuntimeTextHookHelper.TranslateObjectHierarchyIfChanged( __result, "Object.Internal_CloneSingleWithParent" );
    }
 }

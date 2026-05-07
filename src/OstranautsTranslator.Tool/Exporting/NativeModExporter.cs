@@ -11,6 +11,8 @@ namespace OstranautsTranslator.Tool.Exporting;
 
 internal sealed class NativeModExporter
 {
+   private const char HotkeyTokenDelimiter = '\u241E';
+
    private static readonly JavaScriptEncoder JsonEncoder = JavaScriptEncoder.Create( UnicodeRanges.All );
 
    private static readonly JsonSerializerOptions JsonOptions = new()
@@ -452,12 +454,13 @@ internal sealed class NativeModExporter
             }
 
             patchOperation.Applied = true;
-            patchedValue = fieldName + "|" + patchOperation.TranslatedText;
+            TryParseAssignmentValue( currentValue, out _, out var fieldValue );
+            patchedValue = fieldName + "|" + PreserveDelimitedTokens( fieldValue, patchOperation.TranslatedText );
             return true;
          }
 
          patchOperation.Applied = true;
-         patchedValue = patchOperation.TranslatedText;
+         patchedValue = PreserveDelimitedTokens( currentValue, patchOperation.TranslatedText );
          return true;
       }
 
@@ -479,6 +482,82 @@ internal sealed class NativeModExporter
       fieldValue = values[ 1 ];
 
       return !string.IsNullOrWhiteSpace( fieldName ) && !string.IsNullOrWhiteSpace( fieldValue );
+   }
+
+   private static string PreserveDelimitedTokens( string? sourceText, string translatedText )
+   {
+      if( string.IsNullOrEmpty( sourceText ) || string.IsNullOrEmpty( translatedText ) )
+      {
+         return translatedText;
+      }
+
+      var sourceTokens = ExtractDelimitedTokenContents( sourceText );
+      if( sourceTokens.Count == 0 )
+      {
+         return translatedText;
+      }
+
+      var translatedRanges = ExtractDelimitedTokenRanges( translatedText );
+      if( translatedRanges.Count != sourceTokens.Count )
+      {
+         return translatedText;
+      }
+
+      var builder = new StringBuilder( translatedText.Length );
+      var cursor = 0;
+      for( var index = 0; index < translatedRanges.Count; index++ )
+      {
+         var range = translatedRanges[ index ];
+         builder.Append( translatedText, cursor, range.Start - cursor );
+         builder.Append( HotkeyTokenDelimiter );
+         builder.Append( sourceTokens[ index ] );
+         builder.Append( HotkeyTokenDelimiter );
+         cursor = range.End + 1;
+      }
+
+      builder.Append( translatedText, cursor, translatedText.Length - cursor );
+      return builder.ToString();
+   }
+
+   private static List<string> ExtractDelimitedTokenContents( string value )
+   {
+      var results = new List<string>();
+      foreach( var range in ExtractDelimitedTokenRanges( value ) )
+      {
+         results.Add( value.Substring( range.Start + 1, range.End - range.Start - 1 ) );
+      }
+
+      return results;
+   }
+
+   private static List<(int Start, int End)> ExtractDelimitedTokenRanges( string value )
+   {
+      var results = new List<(int Start, int End)>();
+      var tokenStart = -1;
+
+      for( var index = 0; index < value.Length; index++ )
+      {
+         if( value[ index ] != HotkeyTokenDelimiter )
+         {
+            continue;
+         }
+
+         if( tokenStart < 0 )
+         {
+            tokenStart = index;
+            continue;
+         }
+
+         results.Add( (tokenStart, index) );
+         tokenStart = -1;
+      }
+
+      if( tokenStart >= 0 )
+      {
+         return new List<(int Start, int End)>();
+      }
+
+      return results;
    }
 
    private void Warn( string message )

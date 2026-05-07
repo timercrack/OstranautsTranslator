@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 using BepInEx;
@@ -22,6 +23,7 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
 {
    private const KeyCode StatusWindowToggleKey = KeyCode.F6;
    private const int MaxCachedTranslationResults = 32768;
+   private static readonly Regex RuntimeFixedEntryRegex = new Regex( "\\{\\s*\\\"raw_text\\\"\\s*:\\s*\\\"(?<raw>(?:\\\\.|[^\\\"\\\\])*)\\\".*?\\\"seed_translations\\\"\\s*:\\s*\\{(?<translations>.*?)\\}\\s*\\}", RegexOptions.Compiled | RegexOptions.Singleline );
    private static readonly Regex LeadingYouRegex = new Regex( @"(^|\n)You(?=(?:\s|[，。？！：；、,.!?;:()\[\]{}<>\""'“”‘’]))", RegexOptions.Compiled );
    private static readonly Regex PlaceholderLoreRegex = new Regex( @"^\$template\b", RegexOptions.Compiled | RegexOptions.IgnoreCase );
    private static bool _runtimeProxyCreated;
@@ -32,6 +34,7 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
    private readonly TranslationRuntimeStatistics _translationStatistics = new TranslationRuntimeStatistics();
    private readonly ConcurrentDictionary<string, CachedTranslationResult> _translationResultCache = new ConcurrentDictionary<string, CachedTranslationResult>( StringComparer.Ordinal );
    private readonly ConcurrentDictionary<string, byte> _missingProjectionCache = new ConcurrentDictionary<string, byte>( StringComparer.Ordinal );
+   private IReadOnlyDictionary<string, string> _bootstrapFixedTranslations = new Dictionary<string, string>( StringComparer.Ordinal );
    private TranslationStatusWindow _statusWindow;
    private bool _inputSupported = true;
    private bool _inputLoopLogged;
@@ -180,6 +183,7 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
 
       var databasePath = ResolveDatabasePath();
       _runtimeMissCollector.Initialize( databasePath );
+      _bootstrapFixedTranslations = LoadBootstrapFixedTranslations( databasePath, PluginSettings.Language.Value );
 
       if( !File.Exists( databasePath ) )
       {
@@ -281,6 +285,12 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
    {
       try
       {
+         if( _bootstrapFixedTranslations.TryGetValue( value, out var bootstrapTranslated ) && !string.IsNullOrWhiteSpace( bootstrapTranslated ) )
+         {
+            CacheTranslationResult( value, bootstrapTranslated, CachedTranslationKind.BootstrapFixed );
+            return bootstrapTranslated;
+         }
+
          if( string.IsNullOrWhiteSpace( _catalog.DatabasePath ) )
          {
             return value;
@@ -473,9 +483,69 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
       NoMatch,
       IgnoredNativeModSource,
       NormalizedFallback,
+         BootstrapFixed,
       Translated,
       VolatileBypass,
       PlaceholderBypass,
+   }
+
+   private static IReadOnlyDictionary<string, string> LoadBootstrapFixedTranslations( string databasePath, string configuredLanguage )
+   {
+      try
+      {
+         var manifestPath = ResolveBootstrapManifestPath( databasePath );
+         if( string.IsNullOrWhiteSpace( manifestPath ) || !File.Exists( manifestPath ) )
+         {
+            return new Dictionary<string, string>( StringComparer.Ordinal );
+         }
+
+         var language = RuntimeTranslationDeployment.ResolveTargetLanguage( configuredLanguage );
+         var content = File.ReadAllText( manifestPath );
+         var languageRegex = new Regex( "\\\"" + Regex.Escape( language ) + "\\\"\\s*:\\s*\\\"(?<value>(?:\\\\.|[^\\\"\\\\])*)\\\"", RegexOptions.Compiled );
+         var translations = new Dictionary<string, string>( StringComparer.Ordinal );
+         foreach( Match entryMatch in RuntimeFixedEntryRegex.Matches( content ) )
+         {
+            if( !entryMatch.Success ) continue;
+
+            var rawText = UnescapeJsonString( entryMatch.Groups[ "raw" ].Value );
+            if( string.IsNullOrWhiteSpace( rawText ) ) continue;
+
+            var translatedMatch = languageRegex.Match( entryMatch.Groups[ "translations" ].Value );
+            if( !translatedMatch.Success ) continue;
+
+            var translatedText = UnescapeJsonString( translatedMatch.Groups[ "value" ].Value );
+            if( string.IsNullOrWhiteSpace( translatedText ) ) continue;
+
+            translations[ rawText ] = translatedText;
+         }
+
+         return translations;
+      }
+      catch
+      {
+         return new Dictionary<string, string>( StringComparer.Ordinal );
+      }
+   }
+
+   private static string UnescapeJsonString( string value )
+   {
+      if( string.IsNullOrEmpty( value ) ) return string.Empty;
+
+      return Regex.Unescape( value )
+         .Replace( "\\/", "/" );
+   }
+
+   private static string ResolveBootstrapManifestPath( string databasePath )
+   {
+      if( string.IsNullOrWhiteSpace( databasePath ) ) return string.Empty;
+
+      var workspaceDirectory = Path.GetDirectoryName( databasePath );
+      if( string.IsNullOrWhiteSpace( workspaceDirectory ) ) return string.Empty;
+
+      var translatorDirectory = Directory.GetParent( workspaceDirectory )?.FullName;
+      if( string.IsNullOrWhiteSpace( translatorDirectory ) ) return string.Empty;
+
+      return Path.Combine( translatorDirectory, "runtime-fixed-source.json" );
    }
 
    private string ResolveDatabasePath()
