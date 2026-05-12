@@ -1,0 +1,8 @@
+# Install PaddlePaddle first if it is not already available in your Python runtime.
+# CPU example on Windows:
+#   pip install paddlepaddle
+
+paddleocr>=2.8,<3.0
+pillow>=10.0,<12.0
+numpy>=1.26,<3.0
+requests[socks]>=2.32,<3.0

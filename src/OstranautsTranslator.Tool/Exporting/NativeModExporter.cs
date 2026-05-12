@@ -132,6 +132,8 @@ internal sealed class NativeModExporter
          }
       }
 
+      filesWritten += CopyGuiButtonImages( modDirectoryPath );
+
       var loadingOrderPath = WriteLoadingOrder( outputRootPath );
       WriteModInfo( modDirectoryPath );
 
@@ -256,6 +258,32 @@ internal sealed class NativeModExporter
       }
 
       return dataRootPath;
+   }
+
+   private int CopyGuiButtonImages( string modDirectoryPath )
+   {
+      var sourceImagesDirectoryPath = Path.Combine( _options.GameRootPath, "Ostranauts_Data", "StreamingAssets", "images" );
+      if( !Directory.Exists( sourceImagesDirectoryPath ) )
+      {
+         Warn( $"Skipping GUI button image mirroring because '{sourceImagesDirectoryPath}' was not found." );
+         return 0;
+      }
+
+      var outputImagesDirectoryPath = Path.Combine( modDirectoryPath, "images" );
+      Directory.CreateDirectory( outputImagesDirectoryPath );
+
+      var copiedCount = 0;
+      foreach( var sourceFilePath in Directory.EnumerateFiles( sourceImagesDirectoryPath, "GUIBtn*.png", SearchOption.TopDirectoryOnly ) )
+      {
+         var fileName = Path.GetFileName( sourceFilePath );
+         if( string.IsNullOrWhiteSpace( fileName ) ) continue;
+
+         var outputFilePath = Path.Combine( outputImagesDirectoryPath, fileName );
+         File.Copy( sourceFilePath, outputFilePath, overwrite: true );
+         copiedCount++;
+      }
+
+      return copiedCount;
    }
 
    private static void PrepareOutputDirectories( string outputRootPath, string modDirectoryPath, string modDataDirectoryPath )

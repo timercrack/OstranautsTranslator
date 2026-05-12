@@ -7,6 +7,7 @@ namespace OstranautsTranslator.Tool;
 
 internal sealed class DeepSeekClient : IDisposable
 {
+   private const string JsonModePromptSuffix = " JSON output requirement: return exactly one valid JSON object using this exact shape: {\"translations\":[\"...\"]}. The translations array must contain the same number of elements and the same order as the input JSON array. Output only that JSON object. Do not output a top-level JSON array. Do not output markdown, code fences, comments, or any extra text. If any earlier instruction conflicts with this JSON object requirement, this JSON object requirement wins.";
    private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
    {
       WriteIndented = false,
@@ -57,7 +58,7 @@ internal sealed class DeepSeekClient : IDisposable
          new
          {
             role = "system",
-            content = _settings.SystemPrompt,
+            content = BuildJsonModeSystemPrompt( _settings.SystemPrompt ),
          },
       };
 
@@ -80,6 +81,10 @@ internal sealed class DeepSeekClient : IDisposable
       {
          model = _settings.Model,
          messages,
+         response_format = new
+         {
+            type = "json_object",
+         },
          temperature = _settings.Temperature,
          max_tokens = _settings.MaxTokens,
          thinking = new
@@ -160,6 +165,23 @@ internal sealed class DeepSeekClient : IDisposable
       {
          _httpClient.Dispose();
       }
+   }
+
+   private static string BuildJsonModeSystemPrompt( string? systemPrompt )
+   {
+      var basePrompt = string.IsNullOrWhiteSpace( systemPrompt )
+         ? string.Empty
+         : systemPrompt.Trim();
+
+      if( basePrompt.IndexOf( "{\"translations\"", StringComparison.Ordinal ) >= 0
+         && basePrompt.IndexOf( "json object", StringComparison.OrdinalIgnoreCase ) >= 0 )
+      {
+         return basePrompt;
+      }
+
+      if( basePrompt.Length == 0 ) return JsonModePromptSuffix.TrimStart();
+
+      return basePrompt + JsonModePromptSuffix;
    }
 
    private static IReadOnlyList<string>? TryParseBatchResponse( string data, int expectedCount )

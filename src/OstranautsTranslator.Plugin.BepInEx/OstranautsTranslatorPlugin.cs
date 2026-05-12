@@ -23,6 +23,7 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
 {
    private const KeyCode StatusWindowToggleKey = KeyCode.F6;
    private const int MaxCachedTranslationResults = 32768;
+   private const int SceneWarmupScanFrames = 12;
    private static readonly Regex RuntimeFixedEntryRegex = new Regex( "\\{\\s*\\\"raw_text\\\"\\s*:\\s*\\\"(?<raw>(?:\\\\.|[^\\\"\\\\])*)\\\".*?\\\"seed_translations\\\"\\s*:\\s*\\{(?<translations>.*?)\\}\\s*\\}", RegexOptions.Compiled | RegexOptions.Singleline );
    private static readonly Regex LeadingYouRegex = new Regex( @"(^|\n)You(?=(?:\s|[，。？！：；、,.!?;:()\[\]{}<>\""'“”‘’]))", RegexOptions.Compiled );
    private static readonly Regex PlaceholderLoreRegex = new Regex( @"^\$template\b", RegexOptions.Compiled | RegexOptions.IgnoreCase );
@@ -38,6 +39,7 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
    private TranslationStatusWindow _statusWindow;
    private bool _inputSupported = true;
    private bool _inputLoopLogged;
+   private int _sceneWarmupScansRemaining;
    private string _currentGameVersion = string.Empty;
    private string _recordedGameVersion = string.Empty;
    private string _gameVersionStatus = "未检查";
@@ -81,6 +83,8 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
 
          Logger.LogInfo( "Running initial runtime text scan..." );
          RuntimeTextRescanner.ForceScanAll();
+         _sceneWarmupScansRemaining = SceneWarmupScanFrames;
+         TickSceneWarmupScan();
 
          Logger.LogInfo( "Applying configured TMP fallback fonts to currently loaded text components..." );
          TmpFontManager.ApplyOverrideFontToLoadedTextComponents();
@@ -104,6 +108,7 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
 
    internal void TickRuntime()
    {
+      TickSceneWarmupScan();
       TmpFontManager.Tick();
       RuntimeTextRescanner.Tick();
 
@@ -114,6 +119,17 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
       }
 
       HandleStatusWindowHotkeySafe();
+   }
+
+   private void TickSceneWarmupScan()
+   {
+      if( _sceneWarmupScansRemaining <= 0 )
+      {
+         return;
+      }
+
+      RuntimeTextRescanner.ForceScanAll();
+      _sceneWarmupScansRemaining--;
    }
 
    internal void RenderRuntimeGui()
@@ -167,6 +183,13 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
       }
 
       return instance.TranslateCore( value, hookName );
+   }
+
+   internal static void LogDiagnostic( string message )
+   {
+      if( string.IsNullOrWhiteSpace( message ) ) return;
+
+      Instance?.Logger.LogInfo( "[MenuDiag] " + message );
    }
 
    private void ReloadCatalog()

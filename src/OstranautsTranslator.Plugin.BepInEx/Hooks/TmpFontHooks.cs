@@ -74,9 +74,9 @@ internal static class TMP_Text_SetText_Hook
       return AccessTools.Method( TmpTypeResolver.Get( "TMPro.TMP_Text" ), "SetText", new[] { typeof( string ), typeof( bool ) } );
    }
 
-   private static void Prefix( ref string text )
+   private static void Prefix( ref string __0 )
    {
-      text = OstranautsTranslatorPlugin.Translate( text, "TMP_Text.SetText" );
+      __0 = OstranautsTranslatorPlugin.Translate( __0, "TMP_Text.SetText" );
    }
 
    private static void Postfix( object __instance )

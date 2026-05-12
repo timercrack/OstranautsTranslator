@@ -45,9 +45,9 @@ internal static class TMP_Text_SetText_StringBuilder_Hook
       return AccessTools.Method( TmpTypeResolver.Get( "TMPro.TMP_Text" ), "SetText", new[] { typeof( StringBuilder ) } );
    }
 
-   private static void Prefix( ref StringBuilder text )
+   private static void Prefix( ref StringBuilder __0 )
    {
-      RuntimeTextHookHelper.TranslateStringBuilder( ref text, "TMP_Text.SetText(StringBuilder)" );
+      RuntimeTextHookHelper.TranslateStringBuilder( ref __0, "TMP_Text.SetText(StringBuilder)" );
    }
 
    private static void Postfix( object __instance )
@@ -69,9 +69,9 @@ internal static class TMP_Text_SetText_StringFloatFloatFloat_Hook
       return AccessTools.Method( TmpTypeResolver.Get( "TMPro.TMP_Text" ), "SetText", new[] { typeof( string ), typeof( float ), typeof( float ), typeof( float ) } );
    }
 
-   private static void Prefix( ref string text )
+   private static void Prefix( ref string __0 )
    {
-      text = OstranautsTranslatorPlugin.Translate( text, "TMP_Text.SetText(string,float,float,float)" );
+      __0 = OstranautsTranslatorPlugin.Translate( __0, "TMP_Text.SetText(string,float,float,float)" );
    }
 
    private static void Postfix( object __instance )
@@ -93,7 +93,7 @@ internal static class TMP_Text_SetCharArray_Hook1
       return AccessTools.Method( TmpTypeResolver.Get( "TMPro.TMP_Text" ), "SetCharArray", new[] { typeof( char[] ) } );
    }
 
-   private static void Prefix( ref char[] chars )
+   private static void Prefix( ref char[] __0 )
    {
       // TMP frequently reuses internal buffers here. Translate the finalized text in Postfix instead.
    }
@@ -117,7 +117,7 @@ internal static class TMP_Text_SetCharArray_Hook2
       return AccessTools.Method( TmpTypeResolver.Get( "TMPro.TMP_Text" ), "SetCharArray", new[] { typeof( char[] ), typeof( int ), typeof( int ) } );
    }
 
-   private static void Prefix( ref char[] chars, ref int start, ref int length )
+   private static void Prefix( ref char[] __0, ref int __1, ref int __2 )
    {
       // TMP passes array slices here; translating the slice corrupts rich-text boundaries.
    }
@@ -141,7 +141,7 @@ internal static class TMP_Text_SetCharArray_Hook3
       return AccessTools.Method( TmpTypeResolver.Get( "TMPro.TMP_Text" ), "SetCharArray", new[] { typeof( int[] ), typeof( int ), typeof( int ) } );
    }
 
-   private static void Prefix( ref int[] chars, ref int start, ref int length )
+   private static void Prefix( ref int[] __0, ref int __1, ref int __2 )
    {
       // TMP passes array slices here; translating the slice corrupts rich-text boundaries.
    }
@@ -274,9 +274,9 @@ internal static class GUI_Label_String_Hook
       return AccessTools.Method( typeof( GUI ), "Label", new[] { typeof( Rect ), typeof( string ) } );
    }
 
-   private static void Prefix( ref string text )
+   private static void Prefix( ref string __1 )
    {
-      text = OstranautsTranslatorPlugin.Translate( text, "GUI.Label(string)" );
+      __1 = OstranautsTranslatorPlugin.Translate( __1, "GUI.Label(string)" );
    }
 }
 
@@ -288,9 +288,9 @@ internal static class GUI_Box_String_Hook
       return AccessTools.Method( typeof( GUI ), "Box", new[] { typeof( Rect ), typeof( string ) } );
    }
 
-   private static void Prefix( ref string text )
+   private static void Prefix( ref string __1 )
    {
-      text = OstranautsTranslatorPlugin.Translate( text, "GUI.Box(string)" );
+      __1 = OstranautsTranslatorPlugin.Translate( __1, "GUI.Box(string)" );
    }
 }
 
@@ -302,9 +302,9 @@ internal static class GUI_Button_String_Hook
       return AccessTools.Method( typeof( GUI ), "Button", new[] { typeof( Rect ), typeof( string ) } );
    }
 
-   private static void Prefix( ref string text )
+   private static void Prefix( ref string __1 )
    {
-      text = OstranautsTranslatorPlugin.Translate( text, "GUI.Button(string)" );
+      __1 = OstranautsTranslatorPlugin.Translate( __1, "GUI.Button(string)" );
    }
 }
 
@@ -316,9 +316,9 @@ internal static class GUI_Window_String_Hook
       return AccessTools.Method( typeof( GUI ), "Window", new[] { typeof( int ), typeof( Rect ), typeof( GUI.WindowFunction ), typeof( string ) } );
    }
 
-   private static void Prefix( ref string text )
+   private static void Prefix( ref string __3 )
    {
-      text = OstranautsTranslatorPlugin.Translate( text, "GUI.Window(string)" );
+      __3 = OstranautsTranslatorPlugin.Translate( __3, "GUI.Window(string)" );
    }
 }
 
