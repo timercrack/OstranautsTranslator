@@ -40,6 +40,7 @@ class DeepSeekTranslator:
         target_language: str,
         proxy: str | None,
         timeout_seconds: int,
+        system_prompt: str | None = None,
     ) -> None:
         import requests
 
@@ -48,6 +49,7 @@ class DeepSeekTranslator:
         self._source_language = source_language
         self._target_language = target_language
         self._timeout_seconds = timeout_seconds
+        self._system_prompt = system_prompt
         self._session = requests.Session()
         if proxy:
             self._session.proxies.update({"http": proxy, "https": proxy})
@@ -114,6 +116,9 @@ class DeepSeekTranslator:
         return ["" if item is None else str(item) for item in translations]
 
     def _build_system_prompt(self) -> str:
+        if self._system_prompt:
+            return self._system_prompt
+
         return (
             f"You translate OCR text snippets from {self._source_language} into "
             f"{self._target_language}. The user message is always a JSON array of text "
@@ -467,6 +472,14 @@ def fit_text_to_box(
     return best_font, best_lines
 
 
+def get_effective_line_height(font: Any, fallback_height: int, stroke_width: int) -> int:
+    if hasattr(font, "getmetrics"):
+        ascent, descent = font.getmetrics()
+        return max(fallback_height, int(ascent + descent + stroke_width))
+
+    return fallback_height
+
+
 def wrap_text(
     draw: Any,
     text: str,
@@ -476,6 +489,17 @@ def wrap_text(
 ) -> list[str]:
     if not text:
         return [""]
+
+    if "\n" in text:
+        wrapped_lines: list[str] = []
+        for paragraph in text.splitlines():
+            if not paragraph:
+                wrapped_lines.append("")
+                continue
+
+            wrapped_lines.extend(wrap_text(draw, paragraph, font, max_width, stroke_width))
+
+        return wrapped_lines or [""]
 
     if any(character.isspace() for character in text.strip()):
         word_lines = wrap_words(draw, text, font, max_width, stroke_width)
@@ -554,12 +578,17 @@ def measure_block(
     stroke_width: int,
 ) -> tuple[int, int]:
     widths = [measure_line(draw, line, font, stroke_width) for line in lines]
-    heights = [
-        draw.textbbox((0, 0), line or "Ay", font=font, stroke_width=stroke_width)[3]
-        - draw.textbbox((0, 0), line or "Ay", font=font, stroke_width=stroke_width)[1]
-        for line in lines
-    ]
-    line_gap = max(1, int(font.size * 0.15))
+    heights = []
+    use_relaxed_multiline_height = len(lines) > 1
+    for line in lines:
+        line_bbox = draw.textbbox((0, 0), line or "Ay", font=font, stroke_width=stroke_width)
+        glyph_height = line_bbox[3] - line_bbox[1]
+        if use_relaxed_multiline_height:
+            heights.append(get_effective_line_height(font, glyph_height, stroke_width))
+        else:
+            heights.append(glyph_height)
+
+    line_gap = max(2, int(font.size * (0.22 if use_relaxed_multiline_height else 0.15)))
     total_height = sum(heights) + line_gap * max(0, len(lines) - 1)
     return max(widths, default=0), total_height
 
@@ -576,12 +605,15 @@ def render_lines(
     left, top, right, bottom = bbox
     box_width = max(1, right - left)
     box_height = max(1, bottom - top)
-    line_gap = max(1, int(font.size * 0.15))
+    use_relaxed_multiline_height = len(lines) > 1
+    line_gap = max(2, int(font.size * (0.22 if use_relaxed_multiline_height else 0.15)))
 
     metrics = []
     for line in lines:
         line_bbox = draw.textbbox((0, 0), line or "Ay", font=font, stroke_width=stroke_width)
-        metrics.append((line_bbox[2] - line_bbox[0], line_bbox[3] - line_bbox[1]))
+        glyph_height = line_bbox[3] - line_bbox[1]
+        line_height = get_effective_line_height(font, glyph_height, stroke_width) if use_relaxed_multiline_height else glyph_height
+        metrics.append((line_bbox[2] - line_bbox[0], line_height))
 
     total_height = sum(height for _width, height in metrics) + line_gap * max(0, len(metrics) - 1)
     cursor_y = top + max(0, (box_height - total_height) / 2)

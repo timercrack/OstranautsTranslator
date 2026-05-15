@@ -110,8 +110,8 @@
   仅殖民地显示名纳入；生成参数与标识仍属逻辑。
 - `info` — `structured: strNodeLabel, strArticleTitle, strArticleBody`  
   Info UI 的节点名、文章标题和正文纳入；其余图结构仍属逻辑。
-- `interactions` — `structured: strTitle, strDesc, strTooltip, strAttackerName`  
-  仅交互标题/描述/提示/攻击者名纳入；动作组、测试和协议字段不纳入。
+- `interactions` — `structured: strTitle, strDesc, strTooltip, strAttackerName` + `assignment-arrays: aCustomInfos -> PDANotesAdd`  
+  交互标题/描述/提示/攻击者名纳入；此外仅提取 `aCustomInfos` 里 `PDANotesAdd=...` 这种 PDA 笔记正文赋值串的右侧文本。其他动作组、测试和 custom-info 协议字段仍不纳入。
 - `interaction_overrides` — `assignment-arrays: aOverrideValues -> strTitle, strDesc, strTooltip`  
   只提取赋值串里覆写的显示文本；其他 override 值仍是 `field|value` 协议。
 - `jobitems` — `structured: strFriendlyName`  

@@ -12,6 +12,7 @@ namespace OstranautsTranslator.Tool.Exporting;
 internal sealed class NativeModExporter
 {
    private const char HotkeyTokenDelimiter = '\u241E';
+   private const string WorkspaceCustomImagesDirectoryName = "mod-images";
 
    private static readonly JavaScriptEncoder JsonEncoder = JavaScriptEncoder.Create( UnicodeRanges.All );
 
@@ -63,6 +64,7 @@ internal sealed class NativeModExporter
       var modDataDirectoryPath = Path.Combine( modDirectoryPath, "data" );
       var gameDataRootPath = GetGameDataRootPath();
 
+      PreserveCustomImagesFromExistingMod( modDirectoryPath );
       PrepareOutputDirectories( outputRootPath, modDirectoryPath, modDataDirectoryPath );
 
       var patchedOccurrences = 0;
@@ -132,6 +134,7 @@ internal sealed class NativeModExporter
          }
       }
 
+      filesWritten += CopyWorkspaceCustomImages( modDirectoryPath );
       filesWritten += CopyGuiButtonImages( modDirectoryPath );
 
       var loadingOrderPath = WriteLoadingOrder( outputRootPath );
@@ -279,11 +282,85 @@ internal sealed class NativeModExporter
          if( string.IsNullOrWhiteSpace( fileName ) ) continue;
 
          var outputFilePath = Path.Combine( outputImagesDirectoryPath, fileName );
-         File.Copy( sourceFilePath, outputFilePath, overwrite: true );
+         if( File.Exists( outputFilePath ) )
+         {
+            continue;
+         }
+
+         File.Copy( sourceFilePath, outputFilePath, overwrite: false );
          copiedCount++;
       }
 
       return copiedCount;
+   }
+
+   private void PreserveCustomImagesFromExistingMod( string modDirectoryPath )
+   {
+      var existingImagesDirectoryPath = Path.Combine( modDirectoryPath, "images" );
+      if( !Directory.Exists( existingImagesDirectoryPath ) )
+      {
+         return;
+      }
+
+      var workspaceCustomImagesDirectoryPath = GetWorkspaceCustomImagesDirectoryPath();
+      foreach( var existingImagePath in Directory.EnumerateFiles( existingImagesDirectoryPath, "*", SearchOption.AllDirectories ) )
+      {
+         var relativeImagePath = Path.GetRelativePath( existingImagesDirectoryPath, existingImagePath );
+         var sourceImagePath = Path.Combine( _options.GameRootPath, "Ostranauts_Data", "StreamingAssets", "images", relativeImagePath );
+         if( File.Exists( sourceImagePath )
+            && string.Equals( FileHashHelper.ComputeFileHash( existingImagePath ), FileHashHelper.ComputeFileHash( sourceImagePath ), StringComparison.OrdinalIgnoreCase ) )
+         {
+            continue;
+         }
+
+         var preservedImagePath = Path.Combine( workspaceCustomImagesDirectoryPath, relativeImagePath );
+         var preservedImageDirectoryPath = Path.GetDirectoryName( preservedImagePath );
+         if( !string.IsNullOrWhiteSpace( preservedImageDirectoryPath ) )
+         {
+            Directory.CreateDirectory( preservedImageDirectoryPath );
+         }
+
+         if( File.Exists( preservedImagePath ) )
+         {
+            continue;
+         }
+
+         File.Copy( existingImagePath, preservedImagePath, overwrite: false );
+      }
+   }
+
+   private int CopyWorkspaceCustomImages( string modDirectoryPath )
+   {
+      var workspaceCustomImagesDirectoryPath = GetWorkspaceCustomImagesDirectoryPath();
+      if( !Directory.Exists( workspaceCustomImagesDirectoryPath ) )
+      {
+         return 0;
+      }
+
+      var outputImagesDirectoryPath = Path.Combine( modDirectoryPath, "images" );
+      Directory.CreateDirectory( outputImagesDirectoryPath );
+
+      var copiedCount = 0;
+      foreach( var customImagePath in Directory.EnumerateFiles( workspaceCustomImagesDirectoryPath, "*", SearchOption.AllDirectories ) )
+      {
+         var relativeImagePath = Path.GetRelativePath( workspaceCustomImagesDirectoryPath, customImagePath );
+         var outputImagePath = Path.Combine( outputImagesDirectoryPath, relativeImagePath );
+         var outputImageDirectoryPath = Path.GetDirectoryName( outputImagePath );
+         if( !string.IsNullOrWhiteSpace( outputImageDirectoryPath ) )
+         {
+            Directory.CreateDirectory( outputImageDirectoryPath );
+         }
+
+         File.Copy( customImagePath, outputImagePath, overwrite: true );
+         copiedCount++;
+      }
+
+      return copiedCount;
+   }
+
+   private string GetWorkspaceCustomImagesDirectoryPath()
+   {
+      return Path.Combine( _workspace.RootPath, WorkspaceCustomImagesDirectoryName );
    }
 
    private static void PrepareOutputDirectories( string outputRootPath, string modDirectoryPath, string modDataDirectoryPath )
@@ -474,7 +551,7 @@ internal sealed class NativeModExporter
 
          if( string.Equals( patchOperation.LocationKind, "json-assignment-array-field", StringComparison.Ordinal ) )
          {
-            if( !TryParseAssignmentValue( currentValue, out var fieldName, out _ )
+            if( !TryParseAssignmentValue( currentValue, out var fieldName, out _, out _ )
                || ( !string.IsNullOrWhiteSpace( patchOperation.ContextAfter )
                   && !string.Equals( fieldName, patchOperation.ContextAfter, StringComparison.Ordinal ) ) )
             {
@@ -482,8 +559,8 @@ internal sealed class NativeModExporter
             }
 
             patchOperation.Applied = true;
-            TryParseAssignmentValue( currentValue, out _, out var fieldValue );
-            patchedValue = fieldName + "|" + PreserveDelimitedTokens( fieldValue, patchOperation.TranslatedText );
+            TryParseAssignmentValue( currentValue, out _, out var fieldValue, out var delimiter );
+            patchedValue = fieldName + delimiter + PreserveDelimitedTokens( fieldValue, patchOperation.TranslatedText );
             return true;
          }
 
@@ -496,18 +573,20 @@ internal sealed class NativeModExporter
       return false;
    }
 
-   private static bool TryParseAssignmentValue( string? rawValue, out string? fieldName, out string? fieldValue )
+   private static bool TryParseAssignmentValue( string? rawValue, out string? fieldName, out string? fieldValue, out char delimiter )
    {
       fieldName = null;
       fieldValue = null;
+      delimiter = '\0';
 
       if( string.IsNullOrWhiteSpace( rawValue ) ) return false;
 
-      var values = rawValue.Split( '|' );
-      if( values.Length != 2 ) return false;
+      var delimiterIndex = rawValue.IndexOfAny( ['|', '='] );
+      if( delimiterIndex <= 0 || delimiterIndex >= rawValue.Length - 1 ) return false;
 
-      fieldName = values[ 0 ];
-      fieldValue = values[ 1 ];
+      delimiter = rawValue[ delimiterIndex ];
+      fieldName = rawValue[..delimiterIndex];
+      fieldValue = rawValue[( delimiterIndex + 1 )..];
 
       return !string.IsNullOrWhiteSpace( fieldName ) && !string.IsNullOrWhiteSpace( fieldValue );
    }

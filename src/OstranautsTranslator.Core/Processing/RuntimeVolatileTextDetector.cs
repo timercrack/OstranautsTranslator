@@ -14,6 +14,7 @@ public static class RuntimeVolatileTextDetector
    private static readonly Regex NumericValueRegex = new Regex( @"^[\$€¥£]?-?\d+(?:[.,]\d+)*%?$", RegexOptions.Compiled );
    private static readonly Regex NumericUnitRegex = new Regex( @"^[\$€¥£]?-?\d+(?:[.,]\d+)?\s*(?:kPa|Pa|°C|C|km|m|s|km/s|m/s|kg|g|kWh|Wh|kW|W|MW|au|h|m|ms)$", RegexOptions.Compiled | RegexOptions.IgnoreCase );
    private static readonly Regex DimensionRegex = new Regex( @"^\d+\s*[xX]\s*\d+$", RegexOptions.Compiled );
+   private static readonly Regex VersionDisplayRegex = new Regex( @"^(?:(?:\p{L}+(?:[ -]\p{L}+)*)\s*:?\s*)?v?\d+\.\d+\.\d+(?:\.\d+){0,2}(?:\s*\(\d+\))?$", RegexOptions.Compiled | RegexOptions.IgnoreCase );
    private static readonly Regex SaveNameRegex = new Regex( @"^(?:(?:auto|quick)save(?:_\d+)?_.+|[a-z]+(?: [a-z]+){1,4}_\d{9,})$", RegexOptions.Compiled | RegexOptions.IgnoreCase );
    private static readonly Regex RuntimeCodeRegex = new Regex( @"^(?:[A-Za-z]{1,4}\s+)?[A-Za-z]{1,4}-\d{1,4}[A-Za-z]?$", RegexOptions.Compiled );
    private static readonly Regex TagPlaceholderRegex = new Regex( @"^\s*<(?:hash|equals|sel|size|color|alpha|align|sprite|b|s)[^>]*>\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase );
@@ -121,6 +122,11 @@ public static class RuntimeVolatileTextDetector
          return true;
       }
 
+      if( LooksLikeVersionDisplay( trimmed ) )
+      {
+         return true;
+      }
+
       var sanitized = NormalizeCandidate( trimmed, handleRichText );
       if( sanitized.Length == 0 )
       {
@@ -128,6 +134,11 @@ public static class RuntimeVolatileTextDetector
       }
 
       if( IsSimpleVolatileValue( sanitized ) )
+      {
+         return true;
+      }
+
+      if( LooksLikeVersionDisplay( sanitized ) )
       {
          return true;
       }
@@ -240,6 +251,16 @@ public static class RuntimeVolatileTextDetector
          || NumericValueRegex.IsMatch( trimmed )
          || NumericUnitRegex.IsMatch( trimmed )
          || DimensionRegex.IsMatch( trimmed );
+   }
+
+   private static bool LooksLikeVersionDisplay( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) )
+      {
+         return false;
+      }
+
+      return VersionDisplayRegex.IsMatch( value.Trim() );
    }
 
    private static string NormalizeCandidate( string value, bool handleRichText )

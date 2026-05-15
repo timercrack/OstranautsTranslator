@@ -23,6 +23,7 @@ internal sealed class OstranautsDataScanner
       DirectoryRule.Structured( "condowners", "condowners", "strNameFriendly", "strNameShort", "strDesc" ),
       DirectoryRule.Structured( "cooverlays", "cooverlays", "strNameFriendly", "strNameShort", "strDesc" ),
       DirectoryRule.Structured( "interactions", "interactions", "strTitle", "strDesc", "strTooltip", "strAttackerName" ),
+      DirectoryRule.AssignmentArrays( "interactions", "interactions-custom-info", ["aCustomInfos"], "PDANotesAdd" ),
       DirectoryRule.AssignmentArrays( "interaction_overrides", "interaction-overrides", ["aOverrideValues"], "strTitle", "strDesc", "strTooltip" ),
       DirectoryRule.Structured( "transit", "transit-labels", "strLabelNameOptional" ),
       DirectoryRule.Structured( "tips", "tips", "strBody" ),
@@ -454,7 +455,7 @@ internal sealed class OstranautsDataScanner
                   foreach( var item in property.Value.EnumerateArray() )
                   {
                      if( item.ValueKind == JsonValueKind.String
-                        && TryParseAssignmentValue( item.GetString(), out var fieldName, out var fieldValue )
+                        && TryParseAssignmentValue( item.GetString(), out var fieldName, out var fieldValue, out _ )
                         && fieldName != null
                         && rule.AllowedFields.Contains( fieldName ) )
                      {
@@ -506,9 +507,6 @@ internal sealed class OstranautsDataScanner
       if( ShouldSkipRawText( rawText ) ) return;
 
       var enrichedMetadataJson = BracketTokenPolicyAnalyzer.EnrichMetadata( rawText, metadataJson );
-      var tokenPolicyMetadata = BracketTokenPolicyAnalyzer.Resolve( rawText, enrichedMetadataJson );
-      if( tokenPolicyMetadata.ShouldSkipAutomaticTranslation ) return;
-
       occurrences.Add( new ScanOccurrence(
          rawText,
          locationKind,
@@ -547,18 +545,20 @@ internal sealed class OstranautsDataScanner
       return values;
    }
 
-   private static bool TryParseAssignmentValue( string? rawValue, out string? fieldName, out string? fieldValue )
+   private static bool TryParseAssignmentValue( string? rawValue, out string? fieldName, out string? fieldValue, out char delimiter )
    {
       fieldName = null;
       fieldValue = null;
+      delimiter = '\0';
 
       if( string.IsNullOrWhiteSpace( rawValue ) ) return false;
 
-      var values = rawValue.Split( '|' );
-      if( values.Length != 2 ) return false;
+      var delimiterIndex = rawValue.IndexOfAny( ['|', '='] );
+      if( delimiterIndex <= 0 || delimiterIndex >= rawValue.Length - 1 ) return false;
 
-      fieldName = values[ 0 ];
-      fieldValue = values[ 1 ];
+      delimiter = rawValue[ delimiterIndex ];
+      fieldName = rawValue[..delimiterIndex];
+      fieldValue = rawValue[( delimiterIndex + 1 )..];
 
       if( string.IsNullOrWhiteSpace( fieldName ) || string.IsNullOrWhiteSpace( fieldValue ) ) return false;
       if( string.Equals( fieldValue, "null", StringComparison.Ordinal ) ) return false;

@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using HarmonyLib;
 
@@ -311,6 +312,15 @@ internal static class PdaRuntimeTranslationHelper
       [ "GUIBuildOther" ] = "Other",
    };
 
+   private static readonly IReadOnlyDictionary<string, string> NotesExactMap = new Dictionary<string, string>( StringComparer.Ordinal )
+   {
+      [ "NEW TO-DOs!" ] = "新的待办事项！",
+      [ "Eat Breakfast" ] = "吃早餐",
+      [ "Organise To-Dos" ] = "整理待办事项",
+      [ "Buy new salvage license" ] = "购买新的打捞许可证",
+      [ "Make enough to get through the day!" ] = "赚够今天撑下去的钱！",
+   };
+
    public static string TranslateAppTitle( string value, string hookName )
    {
       if( string.IsNullOrWhiteSpace( value ) ) return value;
@@ -354,6 +364,28 @@ internal static class PdaRuntimeTranslationHelper
       }
 
       return value;
+   }
+
+   public static void TranslateNotesDisplay( object guiPda, string hookName )
+   {
+      if( guiPda == null ) return;
+
+      var pdaNotes = RuntimeHookTranslationHelper.GetInstanceField( guiPda.GetType(), "pdaNotes" )?.GetValue( guiPda );
+      if( pdaNotes == null ) return;
+
+      var inputField = RuntimeHookTranslationHelper.GetInstanceField( pdaNotes.GetType(), "_input" )?.GetValue( pdaNotes );
+      if( inputField == null ) return;
+
+      var textProperty = RuntimeHookTranslationHelper.GetStringProperty( inputField.GetType(), "text" );
+      if( textProperty == null || !textProperty.CanRead || !textProperty.CanWrite ) return;
+
+      var textValue = textProperty.GetValue( inputField ) as string;
+      if( string.IsNullOrWhiteSpace( textValue ) ) return;
+
+      var translatedText = TranslateNotesText( textValue, hookName );
+      if( string.Equals( translatedText, textValue, StringComparison.Ordinal ) ) return;
+
+      textProperty.SetValue( inputField, translatedText );
    }
 
    public static void TranslateSocialFilterHierarchy( UnityEngine.GameObject root, string hookName )
@@ -400,6 +432,43 @@ internal static class PdaRuntimeTranslationHelper
       return translated;
    }
 
+   public static string TranslateStandingsFactionName( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      return value switch
+      {
+         "Policia Federal" => "联邦警察",
+         "Polícia Federal" => "联邦警察",
+         _ => value
+      };
+   }
+
+   public static string TranslateStandingsReputation( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      return value switch
+      {
+         "Neutral" => "中立",
+         "Friendly" => "友好",
+         "Hostile" => "敌对",
+         _ => value
+      };
+   }
+
    public static string TranslateZoneSelectionLabel( string value, string hookName )
    {
       if( string.IsNullOrWhiteSpace( value ) ) return value;
@@ -424,6 +493,96 @@ internal static class PdaRuntimeTranslationHelper
       return value;
    }
 
+   public static string TranslateRosterCompanyTitle( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      translated = ReplaceCompanySuffix( value, "'s Company", hookName );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      return ReplaceCompanySuffix( value, "'s COMPANY", hookName );
+   }
+
+   public static string TranslateSocialContactBody( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      return TranslateSocialMultiline(
+         value,
+         [
+            ("<b>Relationship Status:</b> ", "<b>关系状态：</b> "),
+            ("<b>Career:</b> ", "<b>职业：</b> "),
+            ("<b>Location:</b> ", "<b>位置：</b> "),
+            ("<b>Notes:</b> ", "<b>备注：</b> ")
+         ],
+         [
+            ("Deceased", "已故")
+         ] );
+   }
+
+   public static string TranslateSocialStatusSummary( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      return TranslateSocialMultiline(
+         value,
+         [
+            ("Age: ", "年龄："),
+            ("Career: ", "职业："),
+            ("Homeworld: ", "母星："),
+            ("Strata: ", "阶层：")
+         ],
+         [
+            ("They See Us As:", "他们眼中的我们："),
+            ("We See Them As:", "我们眼中的他们："),
+            ("None", "无"),
+            ("N/A", "无"),
+            ("None Revealed Yet", "尚未揭示任何内容")
+         ] );
+   }
+
+   public static string TranslateFerryDestinationLabel( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      const string regSuffixToken = "<color=orange> (";
+      var suffixIndex = value.IndexOf( regSuffixToken, StringComparison.Ordinal );
+      if( suffixIndex <= 0 ) return value;
+
+      var destinationName = value.Substring( 0, suffixIndex );
+      var translatedDestinationName = RuntimeTextHookHelper.TranslateTextValue( destinationName, hookName + ".destination" );
+      return string.Equals( translatedDestinationName, destinationName, StringComparison.Ordinal )
+         ? value
+         : translatedDestinationName + value.Substring( suffixIndex );
+   }
+
    public static string GetTextComponentFieldValue( object target, string fieldName )
    {
       if( target == null ) return string.Empty;
@@ -443,6 +602,280 @@ internal static class PdaRuntimeTranslationHelper
       return value.StartsWith( prefix, StringComparison.Ordinal )
          ? replacement + value.Substring( prefix.Length )
          : value;
+   }
+
+   private static string TranslateNotesText( string value, string hookName )
+   {
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      var result = value;
+      foreach( var pair in NotesExactMap )
+      {
+         result = ReplaceOrdinal( result, pair.Key, pair.Value );
+      }
+
+      return result;
+   }
+
+   private static string ReplaceOrdinal( string value, string oldValue, string newValue )
+   {
+      if( string.IsNullOrEmpty( value ) || string.IsNullOrEmpty( oldValue ) ) return value;
+
+      var index = value.IndexOf( oldValue, StringComparison.Ordinal );
+      if( index < 0 ) return value;
+
+      var builder = new StringBuilder( value.Length );
+      var cursor = 0;
+      while( index >= 0 )
+      {
+         builder.Append( value, cursor, index - cursor );
+         builder.Append( newValue );
+         cursor = index + oldValue.Length;
+         index = value.IndexOf( oldValue, cursor, StringComparison.Ordinal );
+      }
+
+      builder.Append( value, cursor, value.Length - cursor );
+      return builder.ToString();
+   }
+
+   private static string ReplaceCompanySuffix( string value, string suffix, string hookName )
+   {
+      if( !value.EndsWith( suffix, StringComparison.Ordinal ) ) return value;
+
+      var companyName = value.Substring( 0, value.Length - suffix.Length );
+      var translatedCompanyName = RuntimeTextHookHelper.TranslateTextValue( companyName, hookName + ".companyName" );
+      return translatedCompanyName + " 的公司";
+   }
+
+   private static string TranslateSocialMultiline(
+      string value,
+      (string Prefix, string Replacement)[] prefixes,
+      (string Source, string Replacement)[] exacts )
+   {
+      var normalized = value.Replace( "\r\n", "\n" );
+      var lines = normalized.Split( '\n' );
+      var changed = false;
+
+      for( var i = 0; i < lines.Length; i++ )
+      {
+         var line = lines[ i ];
+         var translatedLine = line;
+
+         foreach( var exact in exacts )
+         {
+            if( string.Equals( translatedLine, exact.Source, StringComparison.Ordinal ) )
+            {
+               translatedLine = exact.Replacement;
+               break;
+            }
+         }
+
+         foreach( var prefix in prefixes )
+         {
+            translatedLine = ReplacePrefix( translatedLine, prefix.Prefix, prefix.Replacement );
+         }
+
+         if( !string.Equals( translatedLine, line, StringComparison.Ordinal ) )
+         {
+            lines[ i ] = translatedLine;
+            changed = true;
+         }
+      }
+
+      return changed ? string.Join( "\n", lines ) : value;
+   }
+}
+
+internal static class ComputerRuntimeTranslationHelper
+{
+   private static readonly IReadOnlyDictionary<string, string> OverlayVariableExactMap = new Dictionary<string, string>( StringComparer.Ordinal )
+   {
+      [ "_None" ] = "无",
+      [ "_Power" ] = "电力",
+      [ "_Damage" ] = "损伤",
+      [ "_Mass" ] = "质量",
+      [ "_Price" ] = "价格",
+      [ "_Heat" ] = "温度",
+      [ "_Pressure" ] = "压力",
+   };
+
+   private static readonly IReadOnlyDictionary<string, string> GradientExactMap = new Dictionary<string, string>( StringComparer.Ordinal )
+   {
+      [ "Default" ] = "默认",
+      [ "Clean" ] = "纯净",
+      [ "Monochrome" ] = "单色",
+      [ "Tricolor" ] = "三色",
+      [ "Rainbow" ] = "彩虹",
+      [ "Oldred" ] = "复古红",
+      [ "Opacity" ] = "透明度",
+      [ "Golden" ] = "金色",
+      [ "InverseRainbow" ] = "反向彩虹",
+      [ "HeatMap" ] = "热力图",
+      [ "Glitch" ] = "故障",
+      [ "Disco" ] = "迪斯科",
+   };
+
+   public static void TranslateVizHierarchy( object guiPda, string hookName )
+   {
+      if( guiPda == null ) return;
+
+      RuntimeTextHookHelper.TranslateObjectHierarchyIfChanged( guiPda as UnityEngine.Object, hookName );
+
+      var pdaVisualisers = RuntimeHookTranslationHelper.GetInstanceField( guiPda.GetType(), "pdaVisualisers" )?.GetValue( guiPda );
+      TranslateVizDynamicDisplays( pdaVisualisers, hookName );
+   }
+
+   public static void TranslateVizDynamicDisplays( object pdaVisualisers, string hookName )
+   {
+      if( pdaVisualisers == null ) return;
+
+      TranslateVizOverlayVariableDisplay( pdaVisualisers, hookName + ".OverlayVariable" );
+      TranslateVizGradientDisplay( pdaVisualisers, hookName + ".Gradient" );
+   }
+
+   public static void TranslateVizOverlayVariableDisplay( object pdaVisualisers, string hookName )
+   {
+      if( pdaVisualisers == null ) return;
+
+      var inputField = RuntimeHookTranslationHelper.GetInstanceField( pdaVisualisers.GetType(), "_txtOverlayVariable" )?.GetValue( pdaVisualisers );
+      if( inputField == null ) return;
+
+      var textValue = RuntimeHookTranslationHelper.GetStringProperty( inputField.GetType(), "text" )?.GetValue( inputField ) as string;
+      if( string.IsNullOrWhiteSpace( textValue ) ) return;
+
+      if( !OverlayVariableExactMap.TryGetValue( textValue, out var translatedText ) )
+      {
+         translatedText = RuntimeTextHookHelper.TranslateTextValue( textValue, hookName );
+      }
+
+      if( string.Equals( translatedText, textValue, StringComparison.Ordinal ) ) return;
+
+      SetVisibleTextComponents( inputField, textValue, translatedText );
+   }
+
+   public static void TranslateVizGradientDisplay( object pdaVisualisers, string hookName )
+   {
+      if( pdaVisualisers == null ) return;
+
+      var value = PdaRuntimeTranslationHelper.GetTextComponentFieldValue( pdaVisualisers, "_txtOverlayGradient" );
+      if( string.IsNullOrWhiteSpace( value ) ) return;
+
+      if( !GradientExactMap.TryGetValue( value, out var translatedText ) )
+      {
+         translatedText = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      }
+
+      if( string.Equals( translatedText, value, StringComparison.Ordinal ) ) return;
+
+      RuntimeHookTranslationHelper.SetTextComponentField( pdaVisualisers, "_txtOverlayGradient", translatedText );
+   }
+
+   private static void SetVisibleTextComponents( object rootComponent, string sourceText, string translatedText )
+   {
+      if( rootComponent == null || string.IsNullOrWhiteSpace( sourceText ) || string.IsNullOrWhiteSpace( translatedText ) ) return;
+
+      var directTextComponent = RuntimeHookTranslationHelper.GetProperty( rootComponent.GetType(), "textComponent" )?.GetValue( rootComponent )
+         ?? RuntimeHookTranslationHelper.GetInstanceField( rootComponent.GetType(), "m_TextComponent" )?.GetValue( rootComponent );
+      if( TrySetComponentTextIfMatches( directTextComponent, sourceText, translatedText ) ) return;
+
+      var root = RuntimeTextHookHelper.GetGameObject( rootComponent );
+      if( root == null ) return;
+
+      var getComponentsInChildren = typeof( UnityEngine.GameObject ).GetMethod( "GetComponentsInChildren", new[] { typeof( Type ), typeof( bool ) } );
+      if( getComponentsInChildren?.Invoke( root, new object[] { typeof( UnityEngine.Component ), true } ) is not IEnumerable components ) return;
+
+      foreach( var component in components )
+      {
+         if( TrySetComponentTextIfMatches( component, sourceText, translatedText ) ) return;
+      }
+   }
+
+   private static bool TrySetComponentTextIfMatches( object component, string sourceText, string translatedText )
+   {
+      if( component == null ) return false;
+
+      var textProperty = RuntimeHookTranslationHelper.GetStringProperty( component.GetType(), "text" );
+      if( textProperty == null || !textProperty.CanRead || !textProperty.CanWrite ) return false;
+
+      var currentText = textProperty.GetValue( component ) as string;
+      if( !string.Equals( currentText, sourceText, StringComparison.Ordinal ) ) return false;
+
+      textProperty.SetValue( component, translatedText );
+      return true;
+   }
+
+   public static void TranslateNavPanelHierarchy( UnityEngine.GameObject root, string hookName )
+   {
+      if( root == null ) return;
+
+      RuntimeTextHookHelper.TranslateHierarchy( root, hookName );
+
+      var getComponentsInChildren = typeof( UnityEngine.GameObject ).GetMethod( "GetComponentsInChildren", new[] { typeof( Type ), typeof( bool ) } );
+      if( getComponentsInChildren == null ) return;
+
+      if( getComponentsInChildren.Invoke( root, new object[] { typeof( UnityEngine.Component ), true } ) is not IEnumerable components ) return;
+
+      foreach( var component in components )
+      {
+         if( component == null ) continue;
+
+         var textProperty = RuntimeHookTranslationHelper.GetStringProperty( component.GetType(), "text" );
+         if( textProperty == null || !textProperty.CanRead || !textProperty.CanWrite ) continue;
+
+         var value = textProperty.GetValue( component ) as string;
+         if( string.IsNullOrWhiteSpace( value ) ) continue;
+
+         var translated = TranslateNavPanelText( value, hookName + "." + component.GetType().Name );
+         if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+         {
+            textProperty.SetValue( component, translated );
+         }
+      }
+   }
+
+   private static string TranslateNavPanelText( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      if( string.Equals( value, "STATUS:\n<color=#25FF78>LINKED</color>", StringComparison.Ordinal ) )
+      {
+         return "状态：\n<color=#25FF78>已链接</color>";
+      }
+
+      if( string.Equals( value, "STATUS:\n<color=#FF5100>UNLINKED</color>", StringComparison.Ordinal ) )
+      {
+         return "状态：\n<color=#FF5100>未链接</color>";
+      }
+
+      if( value.IndexOf( '\n' ) < 0 ) return value;
+
+      var normalized = value.Replace( "\r\n", "\n" );
+      var lines = normalized.Split( '\n' );
+      var changed = false;
+
+      for( var i = 0; i < lines.Length; i++ )
+      {
+         var line = lines[ i ];
+         if( string.IsNullOrWhiteSpace( line ) ) continue;
+
+         var translatedLine = RuntimeTextHookHelper.TranslateTextValue( line, hookName + "[" + i + "]" );
+         if( string.Equals( translatedLine, line, StringComparison.Ordinal ) ) continue;
+
+         lines[ i ] = translatedLine;
+         changed = true;
+      }
+
+      return changed ? string.Join( "\n", lines ) : value;
    }
 }
 
@@ -517,6 +950,11 @@ internal static class LoadingScreenRuntimeTranslationHelper
 
 internal static class SaveLoadRuntimeTranslationHelper
 {
+   private static readonly IReadOnlyDictionary<string, string> ExactCompositeLabelMap = new Dictionary<string, string>( StringComparer.Ordinal )
+   {
+      [ "RST_Portal_Handset" ] = "传送门手持终端",
+   };
+
    public static string TranslateSaveWarning( string value )
    {
       if( string.IsNullOrWhiteSpace( value ) ) return value;
@@ -596,12 +1034,6 @@ internal static class SaveLoadRuntimeTranslationHelper
    {
       if( string.IsNullOrWhiteSpace( value ) ) return value;
 
-      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
-      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
-      {
-         return translated;
-      }
-
       if( value.Contains( " - ", StringComparison.Ordinal ) )
       {
          var parts = value.Split( new[] { " - " }, StringSplitOptions.None );
@@ -609,7 +1041,7 @@ internal static class SaveLoadRuntimeTranslationHelper
          for( var i = 0; i < parts.Length; i++ )
          {
             var part = parts[ i ];
-            var translatedPart = RuntimeTextHookHelper.TranslateTextValue( part, hookName + "[" + i + "]" );
+            var translatedPart = TranslateCompositeToken( part, hookName + "[" + i + "]" );
             if( !string.Equals( translatedPart, part, StringComparison.Ordinal ) )
             {
                parts[ i ] = translatedPart;
@@ -623,12 +1055,108 @@ internal static class SaveLoadRuntimeTranslationHelper
          }
       }
 
+      var translated = TranslateCompositeToken( value, hookName );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
       return value;
+   }
+
+   private static string TranslateCompositeToken( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      if( ExactCompositeLabelMap.TryGetValue( value, out var exactText ) )
+      {
+         return exactText;
+      }
+
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      if( value.StartsWith( "RST_", StringComparison.Ordinal ) )
+      {
+         var normalized = value.Substring( 4 ).Replace( '_', ' ' );
+         var translatedNormalized = RuntimeTextHookHelper.TranslateTextValue( normalized, hookName + ".normalized" );
+         if( !string.Equals( translatedNormalized, normalized, StringComparison.Ordinal ) )
+         {
+            return translatedNormalized;
+         }
+      }
+
+      return value;
+   }
+}
+
+internal static class SaveVersionRuntimeHelper
+{
+   public static void ApplyCurrentBuildToSaveDto( object saveDto )
+   {
+      if( saveDto == null ) return;
+
+      var currentBuild = GetCurrentBuild();
+      if( string.IsNullOrWhiteSpace( currentBuild ) ) return;
+
+      var gameSaveTupleField = RuntimeHookTranslationHelper.GetInstanceField( saveDto.GetType(), "jGameSave" );
+      var gameSaveTuple = gameSaveTupleField?.GetValue( saveDto );
+      var jsonGameSave = RuntimeHookTranslationHelper.GetProperty( gameSaveTuple?.GetType(), "Item2" )?.GetValue( gameSaveTuple );
+      SetStringMember( jsonGameSave, "strVersion", currentBuild );
+   }
+
+   public static void ApplyCurrentBuildToSaveInfo( object saveInfo )
+   {
+      if( saveInfo == null ) return;
+
+      var currentBuild = GetCurrentBuild();
+      if( string.IsNullOrWhiteSpace( currentBuild ) ) return;
+
+      var jsonSaveInfoField = RuntimeHookTranslationHelper.GetInstanceField( saveInfo.GetType(), "_jsonSaveInfo" );
+      var jsonSaveInfo = jsonSaveInfoField?.GetValue( saveInfo );
+      SetStringMember( jsonSaveInfo, "version", currentBuild );
+   }
+
+   private static string GetCurrentBuild()
+   {
+      var dataHandlerType = GameTypeResolver.Get( "DataHandler" );
+      var currentBuild = dataHandlerType?.GetField( "strBuild", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic )?.GetValue( null ) as string;
+      if( !string.IsNullOrWhiteSpace( currentBuild ) )
+      {
+         return currentBuild.Trim();
+      }
+
+      return RuntimeGameVersionResolver.TryResolveCurrentGameBuild( out var gameBuildInfo, out _ )
+         ? gameBuildInfo.DisplayVersion
+         : string.Empty;
+   }
+
+   private static void SetStringMember( object target, string memberName, string value )
+   {
+      if( target == null || string.IsNullOrWhiteSpace( value ) ) return;
+
+      var property = RuntimeHookTranslationHelper.GetProperty( target.GetType(), memberName );
+      if( property?.CanWrite == true && property.PropertyType == typeof( string ) )
+      {
+         property.SetValue( target, value );
+         return;
+      }
+
+      var field = RuntimeHookTranslationHelper.GetInstanceField( target.GetType(), memberName );
+      if( field?.FieldType == typeof( string ) )
+      {
+         field.SetValue( target, value );
+      }
    }
 }
 
 internal static class CrewBarRuntimeTranslationHelper
 {
+   private static readonly HashSet<string> LoggedCrewCardDiagnostics = new HashSet<string>( StringComparer.Ordinal );
+
    public static string TranslateCrewDisplayName( object crewMember )
    {
       if( crewMember == null ) return string.Empty;
@@ -651,6 +1179,27 @@ internal static class CrewBarRuntimeTranslationHelper
       if( crewBar == null ) return;
 
       RuntimeTextHookHelper.TranslateHierarchy( crewBar, "CrewSim.Start.CrewBar" );
+   }
+
+   public static void LogCrewCardDiagnostic( object crewCard, object crewMember, string translatedName )
+   {
+      var rawName = crewMember?.GetType().GetField( "strName", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic )?.GetValue( crewMember ) as string ?? string.Empty;
+      var friendlyName = crewMember?.GetType().GetProperty( "FriendlyName", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic )?.GetValue( crewMember ) as string ?? string.Empty;
+      var key = RuntimeHelpers.GetHashCode( crewCard ) + "|" + rawName + "|" + translatedName;
+      if( !LoggedCrewCardDiagnostics.Add( key ) ) return;
+
+      OstranautsTranslatorPlugin.LogDiagnostic(
+         "CrewCardDiag"
+         + " raw=" + SanitizeDiagnosticValue( rawName )
+         + " friendly=" + SanitizeDiagnosticValue( friendlyName )
+         + " translated=" + SanitizeDiagnosticValue( translatedName ) );
+   }
+
+   private static string SanitizeDiagnosticValue( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return "<empty>";
+
+      return value.Replace( "\r", "\\r" ).Replace( "\n", "\\n" );
    }
 }
 
@@ -1228,6 +1777,27 @@ internal static class ShipRuntimeTranslationHelper
          : value;
    }
 
+   private static string ReplaceOrdinal( string value, string oldValue, string newValue )
+   {
+      if( string.IsNullOrEmpty( value ) || string.IsNullOrEmpty( oldValue ) ) return value;
+
+      var index = value.IndexOf( oldValue, StringComparison.Ordinal );
+      if( index < 0 ) return value;
+
+      var builder = new StringBuilder( value.Length );
+      var cursor = 0;
+      while( index >= 0 )
+      {
+         builder.Append( value, cursor, index - cursor );
+         builder.Append( newValue );
+         cursor = index + oldValue.Length;
+         index = value.IndexOf( oldValue, cursor, StringComparison.Ordinal );
+      }
+
+      builder.Append( value, cursor, value.Length - cursor );
+      return builder.ToString();
+   }
+
    private static string ReplaceToken( string value, string token, string replacement )
    {
       var index = value.IndexOf( token, StringComparison.Ordinal );
@@ -1239,6 +1809,40 @@ internal static class ShipRuntimeTranslationHelper
 
 internal static class TooltipRuntimeTranslationHelper
 {
+   private static readonly Regex PersonNameTokenPattern = new Regex( "[A-Za-z][A-Za-z'’-]*", RegexOptions.CultureInvariant );
+   private static readonly Regex EmbeddedPersonNamePattern = new Regex( "\\b[A-Z][A-Za-z'’-]+(?:\\s+[A-Z][A-Za-z'’-]+){2,}\\b", RegexOptions.CultureInvariant );
+   private static readonly HashSet<string> LoggedCrewTooltipDiagnostics = new HashSet<string>( StringComparer.Ordinal );
+
+   private static readonly IReadOnlyDictionary<string, string> ExactPersonNameTokenMap = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase )
+   {
+      [ "Camila" ] = "卡米拉",
+      [ "Graves" ] = "格雷夫斯",
+      [ "Oluwakemi" ] = "奥卢瓦克米",
+   };
+
+   public static string TranslateCondOwnerDisplayName( string value, object condOwner, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      foreach( var sourceName in EnumerateKnownDisplayNames( condOwner ) )
+      {
+         var translatedName = TranslatePersonName( sourceName, hookName + "." + sourceName );
+         if( string.Equals( translatedName, sourceName, StringComparison.Ordinal ) ) continue;
+
+         if( value.Contains( sourceName, StringComparison.Ordinal ) )
+         {
+            return value.Replace( sourceName, translatedName );
+         }
+
+         if( string.Equals( value, sourceName, StringComparison.Ordinal ) )
+         {
+            return translatedName;
+         }
+      }
+
+      return TranslatePersonName( value, hookName );
+   }
+
    public static string TranslateCondOwnerTooltipText( string value, object condOwner, string hookName )
    {
       if( string.IsNullOrWhiteSpace( value ) ) return value;
@@ -1278,6 +1882,19 @@ internal static class TooltipRuntimeTranslationHelper
       return string.Join( "\n", lines );
    }
 
+   public static string TranslateEmbeddedPersonNames( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      return EmbeddedPersonNamePattern.Replace( value, match =>
+      {
+         var translatedName = TranslatePersonName( match.Value, hookName + ".name" );
+         return string.Equals( translatedName, match.Value, StringComparison.Ordinal )
+            ? match.Value
+            : translatedName;
+      } );
+   }
+
    public static void TranslateCrewTooltip( object tooltip, object crewMember, string hookName )
    {
       if( tooltip == null ) return;
@@ -1293,6 +1910,7 @@ internal static class TooltipRuntimeTranslationHelper
       if( string.IsNullOrWhiteSpace( value ) ) return;
 
       var translated = TranslateCrewTooltipText( value, crewMember, hookName );
+      LogCrewTooltipDiagnostic( tooltip, crewMember, hookName, value, translated );
       if( string.Equals( translated, value, StringComparison.Ordinal ) ) return;
 
       textProperty.SetValue( tooltipTextComponent, translated );
@@ -1340,18 +1958,18 @@ internal static class TooltipRuntimeTranslationHelper
 
    private static string ReplaceCrewName( string value, object crewMember, string hookName )
    {
-      var friendlyName = GetStringMember( crewMember, "FriendlyName" );
-      if( string.IsNullOrWhiteSpace( friendlyName ) )
+      foreach( var sourceName in EnumerateKnownDisplayNames( crewMember ) )
       {
-         friendlyName = GetStringMember( crewMember, "strName" );
+         var translatedName = TranslatePersonName( sourceName, hookName + "." + sourceName );
+         if( string.Equals( translatedName, sourceName, StringComparison.Ordinal ) ) continue;
+
+         if( value.Contains( sourceName, StringComparison.Ordinal ) )
+         {
+            return value.Replace( sourceName, translatedName );
+         }
       }
 
-      if( string.IsNullOrWhiteSpace( friendlyName ) ) return value;
-
-      var translatedName = RuntimeTextHookHelper.TranslateTextValue( friendlyName, hookName + ".FriendlyName" );
-      return string.Equals( translatedName, friendlyName, StringComparison.Ordinal )
-         ? value
-         : value.Replace( friendlyName, translatedName );
+      return value;
    }
 
    private static string ReplaceShiftName( string value, object crewMember, string hookName )
@@ -1462,6 +2080,114 @@ internal static class TooltipRuntimeTranslationHelper
       }
 
       return string.Empty;
+   }
+
+   private static string GetDisplayName( object target )
+   {
+      var displayName = GetStringMember( target, "FriendlyName" );
+      if( !string.IsNullOrWhiteSpace( displayName ) ) return displayName;
+
+      displayName = GetStringMember( target, "strNameFriendly" );
+      if( !string.IsNullOrWhiteSpace( displayName ) ) return displayName;
+
+      return GetStringMember( target, "strName" );
+   }
+
+   private static string GetTranslatedCondOwnerName( object target, string hookName )
+   {
+      foreach( var displayName in EnumerateKnownDisplayNames( target ) )
+      {
+         var translatedName = TranslatePersonName( displayName, hookName + "." + displayName );
+         if( !string.Equals( translatedName, displayName, StringComparison.Ordinal ) )
+         {
+            return translatedName;
+         }
+      }
+
+      return string.Empty;
+   }
+
+   private static IEnumerable<string> EnumerateKnownDisplayNames( object target )
+   {
+      if( target == null ) yield break;
+
+      var seen = new HashSet<string>( StringComparer.Ordinal );
+      foreach( var value in new[]
+      {
+         GetStringMember( target, "FriendlyName" ),
+         GetStringMember( target, "strNameFriendly" ),
+         GetStringMember( target, "strNameShort" ),
+         GetStringMember( target, "strName" ),
+      } )
+      {
+         if( string.IsNullOrWhiteSpace( value ) || !seen.Add( value ) ) continue;
+         yield return value;
+      }
+   }
+
+   private static void LogCrewTooltipDiagnostic( object tooltip, object crewMember, string hookName, string value, string translated )
+   {
+      var key = RuntimeHelpers.GetHashCode( tooltip ) + "|" + value + "|" + translated;
+      if( !LoggedCrewTooltipDiagnostics.Add( key ) ) return;
+
+      OstranautsTranslatorPlugin.LogDiagnostic(
+         "CrewTooltipDiag"
+         + " hook=" + hookName
+         + " window=" + SanitizeDiagnosticValue( RuntimeHookTranslationHelper.GetInstanceField( tooltip.GetType(), "window" )?.GetValue( tooltip )?.ToString() )
+         + " text=" + SanitizeDiagnosticValue( value )
+         + " translated=" + SanitizeDiagnosticValue( translated )
+         + " strName=" + SanitizeDiagnosticValue( GetStringMember( crewMember, "strName" ) )
+         + " strNameFriendly=" + SanitizeDiagnosticValue( GetStringMember( crewMember, "strNameFriendly" ) )
+         + " strNameShort=" + SanitizeDiagnosticValue( GetStringMember( crewMember, "strNameShort" ) ) );
+   }
+
+   private static string SanitizeDiagnosticValue( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return "<empty>";
+
+      return value.Replace( "\r", "\\r" ).Replace( "\n", "\\n" );
+   }
+
+   private static string TranslatePersonName( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) ) return translated;
+
+      var changed = false;
+      var translatedTokenCount = 0;
+      var tokenCount = 0;
+
+      translated = PersonNameTokenPattern.Replace( value, match =>
+      {
+         tokenCount++;
+
+         var translatedToken = TranslatePersonNameToken( match.Value, hookName + ".part" + tokenCount );
+         if( string.Equals( translatedToken, match.Value, StringComparison.Ordinal ) ) return match.Value;
+
+         changed = true;
+         translatedTokenCount++;
+         return translatedToken;
+      } );
+
+      if( !changed ) return value;
+
+      return tokenCount > 1 && translatedTokenCount == tokenCount
+         ? Regex.Replace( translated, "\\s+", "·" )
+         : translated;
+   }
+
+   private static string TranslatePersonNameToken( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      if( ExactPersonNameTokenMap.TryGetValue( value, out var exactTranslated ) )
+      {
+         return exactTranslated;
+      }
+
+      return RuntimeTextHookHelper.TranslateTextValue( value, hookName );
    }
 }
 
@@ -2019,6 +2745,33 @@ internal static class GUITooltip_SetTooltipCrew_Hook
 }
 
 [HarmonyPatch]
+internal static class GUITooltip_Update_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUITooltip" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "GUITooltip" ), "Update", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      if( __instance == null ) return;
+
+      var window = RuntimeHookTranslationHelper.GetInstanceField( __instance.GetType(), "window" )?.GetValue( __instance );
+      if( !string.Equals( window?.ToString(), "Crew", StringComparison.Ordinal ) ) return;
+
+      var crewMember = RuntimeHookTranslationHelper.GetInstanceField( __instance.GetType(), "tooltipCO" )?.GetValue( __instance );
+      if( crewMember == null ) return;
+
+      TooltipRuntimeTranslationHelper.TranslateCrewTooltip( __instance, crewMember, "GUITooltip.Update" );
+   }
+}
+
+[HarmonyPatch]
 internal static class GUITooltip_TooltipTextFormat1_Hook
 {
    private static bool Prepare()
@@ -2069,9 +2822,9 @@ internal static class GUIItemToolTip_SetCondOwner_Hook
       return AccessTools.Method( GameTypeResolver.Get( "GUIItemToolTip" ), "SetCondOwner", new[] { GameTypeResolver.Get( "CondOwner" ) } );
    }
 
-   private static void Postfix( object __instance )
+   private static void Postfix( object __instance, object __0 )
    {
-      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "m_txtName", value => RuntimeTextHookHelper.TranslateTextValue( value, "GUIItemToolTip.SetCondOwner.m_txtName" ) );
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "m_txtName", value => TooltipRuntimeTranslationHelper.TranslateCondOwnerDisplayName( value, __0, "GUIItemToolTip.SetCondOwner.m_txtName" ) );
    }
 }
 
@@ -2091,9 +2844,29 @@ internal static class MegaToolTip_ItemModule_SetData_Hook
 
    private static void Postfix( object __instance, object __0 )
    {
-      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "_txtFullName", value => RuntimeTextHookHelper.TranslateTextValue( value, "MegaToolTip.ItemModule.SetData._txtFullName" ) );
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "_txtFullName", value => TooltipRuntimeTranslationHelper.TranslateCondOwnerDisplayName( value, __0, "MegaToolTip.ItemModule.SetData._txtFullName" ) );
       RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "_txtDescription", value => MegaToolTipRuntimeTranslationHelper.TranslateItemDescription( value, __0, "MegaToolTip.ItemModule.SetData._txtDescription" ) );
       RuntimeTextHookHelper.TranslateObjectHierarchyIfChanged( RuntimeTextHookHelper.GetGameObject( __instance ), "MegaToolTip.ItemModule.SetData" );
+   }
+}
+
+[HarmonyPatch]
+internal static class TooltipPreviewButton_SetData_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.UI.MegaToolTip.TooltipPreviewButton" ) != null
+         && GameTypeResolver.Get( "CondOwner" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "Ostranauts.UI.MegaToolTip.TooltipPreviewButton" ), "SetData", new[] { GameTypeResolver.Get( "CondOwner" ) } );
+   }
+
+   private static void Postfix( object __instance, object __0 )
+   {
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "_txtCOName", value => TooltipRuntimeTranslationHelper.TranslateCondOwnerDisplayName( value, __0, "TooltipPreviewButton.SetData._txtCOName" ) );
    }
 }
 
@@ -2493,6 +3266,25 @@ internal static class GUILoadMenu_Awake_Hook
 }
 
 [HarmonyPatch]
+internal static class GUISaveMenu_Awake_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.UI.Loading.GUISaveMenu" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "Ostranauts.UI.Loading.GUISaveMenu" ), "Awake" );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeTextHookHelper.TranslateHierarchy( RuntimeTextHookHelper.GetGameObject( __instance ), "GUISaveMenu.Awake" );
+   }
+}
+
+[HarmonyPatch]
 internal static class GUILoadMenu_CreateSaveWarning_Hook
 {
    private static bool Prepare()
@@ -2593,6 +3385,44 @@ internal static class LoadListEntry_Setup_Hook
 }
 
 [HarmonyPatch]
+internal static class LoadManager_SaveGameData_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.Core.LoadManager" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "Ostranauts.Core.LoadManager" ), "SaveGameData", new[] { typeof( string ) } );
+   }
+
+   private static void Postfix( object __result )
+   {
+      SaveVersionRuntimeHelper.ApplyCurrentBuildToSaveDto( __result );
+   }
+}
+
+[HarmonyPatch]
+internal static class LoadManager_SaveGameInfo_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.Core.LoadManager" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "Ostranauts.Core.LoadManager" ), "SaveGameInfo", new[] { typeof( string ), typeof( string ), typeof( int ) } );
+   }
+
+   private static void Postfix( object __result )
+   {
+      SaveVersionRuntimeHelper.ApplyCurrentBuildToSaveInfo( __result );
+   }
+}
+
+[HarmonyPatch]
 internal static class DataHandler_GetTip_Hook
 {
    private static bool Prepare()
@@ -2649,7 +3479,9 @@ internal static class GUICrewCard_SetData_Hook
 
    private static void Postfix( object __instance, object co )
    {
-      RuntimeHookTranslationHelper.SetTextComponentField( __instance, "_txtName", CrewBarRuntimeTranslationHelper.TranslateCrewDisplayName( co ) );
+      var translatedName = CrewBarRuntimeTranslationHelper.TranslateCrewDisplayName( co );
+      RuntimeHookTranslationHelper.SetTextComponentField( __instance, "_txtName", translatedName );
+      CrewBarRuntimeTranslationHelper.LogCrewCardDiagnostic( __instance, co, translatedName );
    }
 }
 
@@ -3957,6 +4789,348 @@ internal static class StandingsListElement_Init_Hook
 }
 
 [HarmonyPatch]
+internal static class GUIPDA_ShowSocials_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIPDA" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "GUIPDA" ), "ShowSocials", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeTextHookHelper.TranslateHierarchy( RuntimeTextHookHelper.GetGameObject( __instance ), "GUIPDA.ShowSocials" );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIPDA_ShowStandings_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIPDA" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "GUIPDA" ), "ShowStandings", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeTextHookHelper.TranslateHierarchy( RuntimeTextHookHelper.GetGameObject( __instance ), "GUIPDA.ShowStandings" );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIPDA_SetSelectedFaction_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIPDA" ) != null
+         && GameTypeResolver.Get( "Ostranauts.ShipGUIs.PDA.StandingsDTO" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "GUIPDA" ),
+         "SetSelectedFaction",
+         new[] { GameTypeResolver.Get( "Ostranauts.ShipGUIs.PDA.StandingsDTO" ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeHookTranslationHelper.SetTextComponentField(
+         __instance,
+         "lblFactionName",
+         PdaRuntimeTranslationHelper.TranslateStandingsFactionName(
+            PdaRuntimeTranslationHelper.GetTextComponentFieldValue( __instance, "lblFactionName" ),
+            "GUIPDA.SetSelectedFaction.lblFactionName" ) );
+
+      RuntimeHookTranslationHelper.SetTextComponentField(
+         __instance,
+         "lblFactionRep",
+         PdaRuntimeTranslationHelper.TranslateStandingsReputation(
+            PdaRuntimeTranslationHelper.GetTextComponentFieldValue( __instance, "lblFactionRep" ),
+            "GUIPDA.SetSelectedFaction.lblFactionRep" ) );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIPDA_ToggleNotesUI_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIPDA" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "GUIPDA" ), "ToggleNotesUI", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      PdaRuntimeTranslationHelper.TranslateNotesDisplay( __instance, "GUIPDA.ToggleNotesUI" );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIPDA_ToggleVizUI_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIPDA" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "GUIPDA" ), "ToggleVizUI", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      ComputerRuntimeTranslationHelper.TranslateVizHierarchy( __instance, "GUIPDA.ToggleVizUI" );
+   }
+}
+
+[HarmonyPatch]
+internal static class PDAVisualisers_set_OverlayVariable_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "PDAVisualisers" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return GameTypeResolver.Get( "PDAVisualisers" )?.GetProperty( "OverlayVariable", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic )?.GetSetMethod( true );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      ComputerRuntimeTranslationHelper.TranslateVizOverlayVariableDisplay( __instance, "PDAVisualisers.OverlayVariable" );
+   }
+}
+
+[HarmonyPatch]
+internal static class PDAVisualisers_set_Gradient_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "PDAVisualisers" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return GameTypeResolver.Get( "PDAVisualisers" )?.GetProperty( "Gradient", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic )?.GetSetMethod( true );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      ComputerRuntimeTranslationHelper.TranslateVizGradientDisplay( __instance, "PDAVisualisers.Gradient" );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIPDAFerry_ShowRequest_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIPDAFerry" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "GUIPDAFerry" ), "ShowRequest", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeTextHookHelper.TranslateHierarchy( RuntimeTextHookHelper.GetGameObject( __instance ), "GUIPDAFerry.ShowRequest" );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIPDAFerry_ShowArrival_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIPDAFerry" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "GUIPDAFerry" ), "ShowArrival", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeTextHookHelper.TranslateHierarchy( RuntimeTextHookHelper.GetGameObject( __instance ), "GUIPDAFerry.ShowArrival" );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIPDAFerryRow_SetData_Ship_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.ShipGUIs.PDA.GUIPDAFerryRow" ) != null
+         && GameTypeResolver.Get( "Ship" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "Ostranauts.ShipGUIs.PDA.GUIPDAFerryRow" ),
+         "SetData",
+         new[] { GameTypeResolver.Get( "Ship" ), typeof( double ), typeof( Action<string, double> ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeHookTranslationHelper.SetTextComponentField(
+         __instance,
+         "txtName",
+         PdaRuntimeTranslationHelper.TranslateFerryDestinationLabel(
+            PdaRuntimeTranslationHelper.GetTextComponentFieldValue( __instance, "txtName" ),
+            "GUIPDAFerryRow.SetData.ship.txtName" ) );
+      RuntimeTextHookHelper.TranslateHierarchy( RuntimeTextHookHelper.GetGameObject( __instance ), "GUIPDAFerryRow.SetData.ship" );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIPDAFerryRow_SetData_String_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.ShipGUIs.PDA.GUIPDAFerryRow" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "Ostranauts.ShipGUIs.PDA.GUIPDAFerryRow" ),
+         "SetData",
+         new[] { typeof( string ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeTextHookHelper.TranslateHierarchy( RuntimeTextHookHelper.GetGameObject( __instance ), "GUIPDAFerryRow.SetData.text" );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIPDAFerryHeaderRow_SetData_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.ShipGUIs.PDA.GUIPDAFerryHeaderRow" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "Ostranauts.ShipGUIs.PDA.GUIPDAFerryHeaderRow" ),
+         "SetData",
+         new[] { typeof( string ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeTextHookHelper.TranslateHierarchy( RuntimeTextHookHelper.GetGameObject( __instance ), "GUIPDAFerryHeaderRow.SetData" );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIComputer2_ShowNav_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIComputer2" ) != null
+         && GameTypeResolver.Get( "CondOwner" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      var guiComputerType = GameTypeResolver.Get( "GUIComputer2" );
+      if( guiComputerType == null ) return null;
+
+      foreach( var method in guiComputerType.GetMethods( BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic ) )
+      {
+         if( !string.Equals( method.Name, "ShowNav", StringComparison.Ordinal ) ) continue;
+
+         var parameters = method.GetParameters();
+         if( parameters.Length != 2 ) continue;
+         if( !string.Equals( parameters[ 0 ].ParameterType.Name, "Transform", StringComparison.Ordinal ) ) continue;
+         if( !string.Equals( parameters[ 1 ].ParameterType.Name, "CondOwner", StringComparison.Ordinal ) ) continue;
+
+         return method;
+      }
+
+      return null;
+   }
+
+   private static void Postfix( object __instance )
+   {
+      var root = RuntimeTextHookHelper.GetGameObject( __instance );
+      var navPanel = FindChildGameObject( root, "MiddleGround/Search/pnlNavStation" );
+      ComputerRuntimeTranslationHelper.TranslateNavPanelHierarchy( navPanel, "GUIComputer2.ShowNav" );
+   }
+
+   private static UnityEngine.GameObject FindChildGameObject( UnityEngine.GameObject root, string path )
+   {
+      if( root == null || string.IsNullOrWhiteSpace( path ) ) return null;
+
+      var transformProperty = typeof( UnityEngine.GameObject ).GetProperty( "transform", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      var transform = transformProperty?.GetValue( root, null );
+      if( transform == null ) return null;
+
+      var findMethod = transform.GetType().GetMethod( "Find", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof( string ) }, null );
+      var childTransform = findMethod?.Invoke( transform, new object[] { path } );
+      return RuntimeTextHookHelper.GetGameObject( childTransform );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUISocialsRow_SetContact_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUISocialsRow" ) != null
+         && GameTypeResolver.Get( "Social" ) != null
+         && GameTypeResolver.Get( "PersonSpec" ) != null
+         && GameTypeResolver.Get( "CondOwner" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "GUISocialsRow" ),
+         "SetContact",
+         new[] { GameTypeResolver.Get( "Social" ), GameTypeResolver.Get( "PersonSpec" ), GameTypeResolver.Get( "CondOwner" ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "txtName", value => RuntimeTextHookHelper.TranslateTextValue( value, "GUISocialsRow.SetContact.txtName" ) );
+      RuntimeHookTranslationHelper.SetTextComponentField(
+         __instance,
+         "txtBody",
+         PdaRuntimeTranslationHelper.TranslateSocialContactBody(
+            PdaRuntimeTranslationHelper.GetTextComponentFieldValue( __instance, "txtBody" ),
+            "GUISocialsRow.SetContact.txtBody" ) );
+      RuntimeTextHookHelper.TranslateHierarchy( RuntimeTextHookHelper.GetGameObject( __instance ), "GUISocialsRow.SetContact" );
+   }
+}
+
+[HarmonyPatch]
 internal static class GUIZones_OnTilesSelected_Hook
 {
    private static bool Prepare()
@@ -3977,6 +5151,134 @@ internal static class GUIZones_OnTilesSelected_Hook
    private static void Postfix( object __instance )
    {
       RuntimeHookTranslationHelper.SetTextComponentField( __instance, "_selectedTilesLabel", PdaRuntimeTranslationHelper.TranslateZoneSelectionLabel( PdaRuntimeTranslationHelper.GetTextComponentFieldValue( __instance, "_selectedTilesLabel" ), "GUIZones.OnTilesSelected._selectedTilesLabel" ) );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIZones_ToggleMenuVisibility_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.ShipGUIs.GUIZones" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "Ostranauts.ShipGUIs.GUIZones" ), "ToggleMenuVisibility", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeTextHookHelper.TranslateObjectHierarchyIfChanged( __instance as UnityEngine.Object, "GUIZones.ToggleMenuVisibility" );
+      RuntimeHookTranslationHelper.SetTextComponentField( __instance, "_selectedTilesLabel", PdaRuntimeTranslationHelper.TranslateZoneSelectionLabel( PdaRuntimeTranslationHelper.GetTextComponentFieldValue( __instance, "_selectedTilesLabel" ), "GUIZones.ToggleMenuVisibility._selectedTilesLabel" ) );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIPDA_ToggleObjectives_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIPDA" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "GUIPDA" ), "ToggleObjectives", new[] { typeof( string ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeTextHookHelper.TranslateObjectHierarchyIfChanged( __instance as UnityEngine.Object, "GUIPDA.ToggleObjectives" );
+   }
+}
+
+[HarmonyPatch]
+internal static class ObjectivesApp_SetPage_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.Objectives.ObjectivesApp" ) != null
+         && GameTypeResolver.Get( "Ostranauts.Objectives.ObjectivesAppPage" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "Ostranauts.Objectives.ObjectivesApp" ),
+         "SetPage",
+         new[] { GameTypeResolver.Get( "Ostranauts.Objectives.ObjectivesAppPage" ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeTextHookHelper.TranslateObjectHierarchyIfChanged( __instance as UnityEngine.Object, "ObjectivesApp.SetPage" );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIRoster_Init_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIRoster" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "GUIRoster" ),
+         "Init",
+         new[] { GameTypeResolver.Get( "CondOwner" ), typeof( Dictionary<string, string> ), typeof( string ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeTextHookHelper.TranslateHierarchy( RuntimeTextHookHelper.GetGameObject( __instance ), "GUIRoster.Init" );
+      RuntimeHookTranslationHelper.SetTextComponentField(
+         __instance,
+         "txtTitleValue",
+         PdaRuntimeTranslationHelper.TranslateRosterCompanyTitle(
+            PdaRuntimeTranslationHelper.GetTextComponentFieldValue( __instance, "txtTitleValue" ),
+            "GUIRoster.Init.txtTitleValue" ) );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIDuties_Init_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIDuties" ) != null
+         && GameTypeResolver.Get( "CondOwner" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "GUIDuties" ),
+         "Init",
+         new[] { GameTypeResolver.Get( "CondOwner" ), typeof( Dictionary<string, string> ), typeof( string ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      var root = RuntimeTextHookHelper.GetGameObject( __instance );
+      RuntimeTextHookHelper.TranslateHierarchy( root, "GUIDuties.Init" );
+
+      var transformProperty = typeof( UnityEngine.GameObject ).GetProperty( "transform", BindingFlags.Instance | BindingFlags.Public );
+      var transform = transformProperty?.GetValue( root );
+      var findMethod = transform?.GetType().GetMethod( "Find", new[] { typeof( string ) } );
+      var titleTransform = findMethod?.Invoke( transform, new object[] { "txtTitleValue" } );
+      var tmpTextType = RuntimeTypeResolver.FindLoadedType( "TMPro.TMP_Text" );
+      var getComponentMethod = titleTransform?.GetType().GetMethod( "GetComponent", new[] { typeof( Type ) } );
+      var titleText = tmpTextType == null ? null : getComponentMethod?.Invoke( titleTransform, new object[] { tmpTextType } );
+      var textProperty = titleText?.GetType().GetProperty( "text", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      if( textProperty != null && textProperty.CanRead && textProperty.CanWrite )
+      {
+         var currentText = textProperty.GetValue( titleText ) as string ?? string.Empty;
+         textProperty.SetValue( titleText, PdaRuntimeTranslationHelper.TranslateRosterCompanyTitle( currentText, "GUIDuties.Init.txtTitleValue" ) );
+      }
    }
 }
 
@@ -4034,5 +5336,331 @@ internal static class GUIJobItem_SetData_Installable_Hook
    private static void Postfix( object __instance )
    {
       RuntimeHookTranslationHelper.TranslateTextComponentField( __instance, "_title", "GUIJobItem.SetData.installable" );
+   }
+}
+
+internal static class ChargenCareerRuntimeTranslationHelper
+{
+   private static readonly Dictionary<string, string> ExactTextMap = new Dictionary<string, string>( StringComparer.Ordinal )
+   {
+      [ "Summary" ] = "摘要",
+      [ "Selected Skills" ] = "已选项目",
+      [ "Costs" ] = "耗时",
+      [ "Apply" ] = "应用",
+      [ "Undo Last" ] = "撤销上一步",
+      [ "Clear" ] = "清除",
+      [ "Total cost cannot be negative" ] = "总耗时不能为负数",
+      [ "Ambitious" ] = "有抱负",
+      [ "Feels Ambitious" ] = "感到有抱负",
+      [ "Anti-GMO" ] = "反对基改",
+      [ "Apathetic" ] = "冷漠",
+      [ "Feels Apathetic" ] = "感到冷漠",
+      [ "Arrogant" ] = "傲慢",
+      [ "Beautiful" ] = "迷人",
+      [ "Brave" ] = "勇敢",
+      [ "Feels Brave" ] = "感到勇敢",
+      [ "Charismatic" ] = "有魅力",
+      [ "Chaste" ] = "禁欲",
+      [ "Feels Chaste" ] = "感到禁欲"
+   };
+
+   private static readonly Dictionary<string, string> ShipInfoLabelMap = new Dictionary<string, string>( StringComparer.Ordinal )
+   {
+      [ "Make" ] = "制造商",
+      [ "Model" ] = "型号",
+      [ "Year" ] = "年份",
+      [ "Designation" ] = "用途",
+      [ "Dimensions" ] = "尺寸",
+      [ "Mass" ] = "质量",
+      [ "RCS Count" ] = "RCS 数量",
+      [ "Torch Drive" ] = "火炬引擎",
+      [ "Location" ] = "位置",
+      [ "Docked" ] = "已停靠",
+      [ "Mortgage" ] = "抵押贷款",
+      [ "Payment per shift" ] = "每班还款"
+   };
+
+   private static readonly Dictionary<string, string> ShipInfoValueMap = new Dictionary<string, string>( StringComparer.Ordinal )
+   {
+      [ "Yes" ] = "是",
+      [ "No" ] = "否",
+      [ "N/A" ] = "无",
+      [ "NO DATA" ] = "无数据"
+   };
+
+   private static readonly Regex SelectedSummaryEntryPattern = new Regex(
+      "^(?<prefix><b>[+-]\\s*)(?<name>.+?)(?<suffix></b>\\s*)$",
+      RegexOptions.Compiled | RegexOptions.Singleline );
+
+   private static readonly Regex ShipInfoLinePattern = new Regex(
+      "^(?<label>Make|Model|Year|Designation|Dimensions|Mass|RCS Count|Torch Drive|Location|Docked|Mortgage|Payment per shift):\\s*(?<value>.*)$",
+      RegexOptions.Compiled | RegexOptions.Singleline );
+
+   public static void TranslateMultiSelectSidebar( object target, string hookName )
+   {
+      var sidebarRoot = GetSidebarRoot( target );
+      if( sidebarRoot == null ) return;
+
+      RuntimeTextHookHelper.TranslateHierarchyIfChanged( sidebarRoot, hookName );
+
+      var getComponentsInChildren = typeof( UnityEngine.GameObject ).GetMethod( "GetComponentsInChildren", new[] { typeof( Type ), typeof( bool ) } );
+      if( getComponentsInChildren?.Invoke( sidebarRoot, new object[] { typeof( UnityEngine.Component ), true } ) is not IEnumerable components )
+      {
+         return;
+      }
+
+      foreach( var component in components )
+      {
+         TranslateTextComponent( component, hookName + "." + component?.GetType().Name );
+      }
+   }
+
+    public static void TranslateMainPanel( object target, string hookName )
+   {
+      var mainRoot = GetMainRoot( target );
+      if( mainRoot == null ) return;
+
+      RuntimeTextHookHelper.TranslateHierarchyIfChanged( mainRoot, hookName );
+
+      var getComponentsInChildren = typeof( UnityEngine.GameObject ).GetMethod( "GetComponentsInChildren", new[] { typeof( Type ), typeof( bool ) } );
+      if( getComponentsInChildren?.Invoke( mainRoot, new object[] { typeof( UnityEngine.Component ), true } ) is not IEnumerable components )
+      {
+         return;
+      }
+
+      foreach( var component in components )
+      {
+         TranslateTextComponent( component, hookName + "." + component?.GetType().Name );
+      }
+   }
+
+   private static UnityEngine.GameObject GetSidebarRoot( object target )
+   {
+      var sidebarField = target == null ? null : RuntimeHookTranslationHelper.GetInstanceField( target.GetType(), "tfSidebar" );
+      return RuntimeTextHookHelper.GetGameObject( sidebarField?.GetValue( target ) );
+   }
+
+   private static UnityEngine.GameObject GetMainRoot( object target )
+   {
+      var mainField = target == null ? null : RuntimeHookTranslationHelper.GetInstanceField( target.GetType(), "tfMain" );
+      return RuntimeTextHookHelper.GetGameObject( mainField?.GetValue( target ) );
+   }
+
+   private static void TranslateTextComponent( object component, string hookName )
+   {
+      if( component == null ) return;
+
+      var textProperty = RuntimeHookTranslationHelper.GetProperty( component.GetType(), "text" );
+      if( textProperty == null || !textProperty.CanRead || !textProperty.CanWrite || textProperty.PropertyType != typeof( string ) ) return;
+
+      var currentText = textProperty.GetValue( component ) as string;
+      var translatedText = TranslateChargenText( currentText, hookName );
+      if( !string.Equals( translatedText, currentText, StringComparison.Ordinal ) )
+      {
+         textProperty.SetValue( component, translatedText );
+      }
+   }
+
+   private static string TranslateChargenText( string text, string hookName )
+   {
+      var translated = TranslateSummaryText( text, hookName );
+      if( !string.Equals( translated, text, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      return TranslateShipInfoText( text, hookName );
+   }
+
+   private static string TranslateSummaryText( string text, string hookName )
+   {
+      if( string.IsNullOrEmpty( text ) ) return text;
+
+      if( ExactTextMap.TryGetValue( text, out var exactTranslated ) )
+      {
+         return exactTranslated;
+      }
+
+      var translated = OstranautsTranslatorPlugin.Translate( text, hookName );
+      if( !string.Equals( translated, text, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      if( text.Contains( "<b>Total Cost: </b>", StringComparison.Ordinal ) )
+      {
+         return ReplaceOrdinal( text, "<b>Total Cost: </b>", "<b>总耗时：</b>" );
+      }
+
+      var entryMatch = SelectedSummaryEntryPattern.Match( text );
+      if( entryMatch.Success )
+      {
+         var conditionName = entryMatch.Groups[ "name" ].Value;
+         var translatedName = TranslateConditionFriendlyName( conditionName, hookName + ".ConditionFriendlyName" );
+         if( !string.Equals( translatedName, conditionName, StringComparison.Ordinal ) )
+         {
+            return entryMatch.Groups[ "prefix" ].Value + translatedName + entryMatch.Groups[ "suffix" ].Value;
+         }
+      }
+
+      return text;
+   }
+
+   private static string TranslateShipInfoText( string text, string hookName )
+   {
+      if( string.IsNullOrEmpty( text ) ) return text;
+
+      if( ShipInfoValueMap.TryGetValue( text, out var exactValueTranslated ) )
+      {
+         return exactValueTranslated;
+      }
+
+      var normalized = text.Replace( "\r\n", "\n" );
+      var lines = normalized.Split( '\n' );
+      var changed = false;
+
+      for( var i = 0; i < lines.Length; i++ )
+      {
+         var line = lines[ i ];
+         if( string.IsNullOrEmpty( line ) ) continue;
+
+         if( ShipInfoValueMap.TryGetValue( line, out var mappedLine ) )
+         {
+            lines[ i ] = mappedLine;
+            changed = true;
+            continue;
+         }
+
+         var match = ShipInfoLinePattern.Match( line );
+         if( !match.Success ) continue;
+
+         var label = match.Groups[ "label" ].Value;
+         var value = match.Groups[ "value" ].Value;
+         if( !ShipInfoLabelMap.TryGetValue( label, out var translatedLabel ) ) continue;
+
+         var translatedValue = TranslateShipInfoValue( value, hookName + ".ShipInfoValue." + label.Replace( ' ', '_' ) );
+         var translatedLine = translatedLabel + "：" + translatedValue;
+         if( !string.Equals( translatedLine, line, StringComparison.Ordinal ) )
+         {
+            lines[ i ] = translatedLine;
+            changed = true;
+         }
+      }
+
+      return changed ? string.Join( "\n", lines ) : text;
+   }
+
+   private static string TranslateShipInfoValue( string value, string hookName )
+   {
+      if( string.IsNullOrEmpty( value ) ) return value;
+
+      if( ShipInfoValueMap.TryGetValue( value, out var mappedValue ) )
+      {
+         return mappedValue;
+      }
+
+      if( value.EndsWith( " (kg)", StringComparison.Ordinal ) )
+      {
+         return value.Substring( 0, value.Length - " (kg)".Length ) + "（千克）";
+      }
+
+      return OstranautsTranslatorPlugin.Translate( value, hookName );
+   }
+
+   private static string TranslateConditionFriendlyName( string conditionName, string hookName )
+   {
+      if( string.IsNullOrEmpty( conditionName ) ) return conditionName;
+
+      if( ExactTextMap.TryGetValue( conditionName, out var mapped ) )
+      {
+         return mapped;
+      }
+
+      return OstranautsTranslatorPlugin.Translate( conditionName, hookName );
+   }
+
+   private static string ReplaceOrdinal( string source, string oldValue, string newValue )
+   {
+      var index = source.IndexOf( oldValue, StringComparison.Ordinal );
+      if( index < 0 ) return source;
+
+      return source.Substring( 0, index ) + newValue + source.Substring( index + oldValue.Length );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIChargenCareer_RebuildMultiSelectSidebar_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIChargenCareer" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "GUIChargenCareer" ), "RebuildMultiSelectSidebar", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      ChargenCareerRuntimeTranslationHelper.TranslateMultiSelectSidebar( __instance, "GUIChargenCareer.RebuildMultiSelectSidebar" );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIChargenCareer_ClickEvent_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIChargenCareer" ) != null
+         && GameTypeResolver.Get( "JsonLifeEvent" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      var guiChargenCareerType = GameTypeResolver.Get( "GUIChargenCareer" );
+      if( guiChargenCareerType == null ) return null;
+
+      foreach( var method in guiChargenCareerType.GetMethods( BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic ) )
+      {
+         if( !string.Equals( method.Name, "ClickEvent", StringComparison.Ordinal ) ) continue;
+
+         var parameters = method.GetParameters();
+         if( parameters.Length != 2 ) continue;
+         if( !string.Equals( parameters[ 0 ].ParameterType.Name, "GameObject", StringComparison.Ordinal ) ) continue;
+         if( !string.Equals( parameters[ 1 ].ParameterType.Name, "JsonLifeEvent", StringComparison.Ordinal ) ) continue;
+
+         return method;
+      }
+
+      return null;
+   }
+
+   private static void Postfix( object __instance )
+   {
+      ChargenCareerRuntimeTranslationHelper.TranslateMainPanel( __instance, "GUIChargenCareer.ClickEvent" );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIChargenCareer_PageEvent_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIChargenCareer" ) != null
+         && GameTypeResolver.Get( "JsonLifeEvent" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "GUIChargenCareer" ),
+         "PageEvent",
+         new[] { GameTypeResolver.Get( "JsonLifeEvent" ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      ChargenCareerRuntimeTranslationHelper.TranslateMainPanel( __instance, "GUIChargenCareer.PageEvent" );
    }
 }

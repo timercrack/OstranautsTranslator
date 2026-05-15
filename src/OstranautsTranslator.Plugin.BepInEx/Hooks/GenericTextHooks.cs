@@ -33,6 +33,46 @@ internal static class UI_Text_OnEnable_Hook
 }
 
 [HarmonyPatch]
+internal static class UI_Text_text_Hook
+{
+   private static bool Prepare()
+   {
+      return UiTypeResolver.Get( "UnityEngine.UI.Text" )?.GetProperty( "text", BindingFlags.Instance | BindingFlags.Public )?.GetSetMethod() != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return UiTypeResolver.Get( "UnityEngine.UI.Text" )?.GetProperty( "text", BindingFlags.Instance | BindingFlags.Public )?.GetSetMethod();
+   }
+
+   private static void Prefix( ref string value )
+   {
+      value = OstranautsTranslatorPlugin.Translate( value, "UI.Text.text" );
+      value = TooltipRuntimeTranslationHelper.TranslateEmbeddedPersonNames( value, "UI.Text.text" );
+   }
+}
+
+[HarmonyPatch]
+internal static class TMP_Text_text_Hook
+{
+   private static bool Prepare()
+   {
+      return TmpTypeResolver.Get( "TMPro.TMP_Text" )?.GetProperty( "text", BindingFlags.Instance | BindingFlags.Public )?.GetSetMethod() != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return TmpTypeResolver.Get( "TMPro.TMP_Text" )?.GetProperty( "text", BindingFlags.Instance | BindingFlags.Public )?.GetSetMethod();
+   }
+
+   private static void Prefix( ref string value )
+   {
+      value = OstranautsTranslatorPlugin.Translate( value, "TMP_Text.text" );
+      value = TooltipRuntimeTranslationHelper.TranslateEmbeddedPersonNames( value, "TMP_Text.text" );
+   }
+}
+
+[HarmonyPatch]
 internal static class TMP_Text_SetText_StringBuilder_Hook
 {
    private static bool Prepare()
@@ -131,14 +171,19 @@ internal static class TMP_Text_SetCharArray_Hook2
 [HarmonyPatch]
 internal static class TMP_Text_SetCharArray_Hook3
 {
+   private static MethodBase ResolveTargetMethod()
+   {
+      return AccessTools.Method( TmpTypeResolver.Get( "TMPro.TMP_Text" ), "SetCharArray", new[] { typeof( int[] ), typeof( int ), typeof( int ) } );
+   }
+
    private static bool Prepare()
    {
-      return TmpTypeResolver.Get( "TMPro.TMP_Text" ) != null;
+      return TmpTypeResolver.Get( "TMPro.TMP_Text" ) != null && ResolveTargetMethod() != null;
    }
 
    private static MethodBase TargetMethod()
    {
-      return AccessTools.Method( TmpTypeResolver.Get( "TMPro.TMP_Text" ), "SetCharArray", new[] { typeof( int[] ), typeof( int ), typeof( int ) } );
+      return ResolveTargetMethod();
    }
 
    private static void Prefix( ref int[] __0, ref int __1, ref int __2 )
@@ -325,6 +370,11 @@ internal static class GUI_Window_String_Hook
 [HarmonyPatch]
 internal static class GUI_BeginGroup_Hook
 {
+   private static bool Prepare()
+   {
+      return AccessTools.Method( typeof( GUI ), "BeginGroup", new[] { typeof( Rect ), RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ), typeof( GUIStyle ) } ) != null;
+   }
+
    private static MethodBase TargetMethod()
    {
       return AccessTools.Method( typeof( GUI ), "BeginGroup", new[] { typeof( Rect ), RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ), typeof( GUIStyle ) } );
@@ -341,7 +391,7 @@ internal static class GUI_BeginGroup_Hook_New
 {
    private static bool Prepare()
    {
-      return RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ) != null;
+      return AccessTools.Method( typeof( GUI ), "BeginGroup", new[] { typeof( Rect ), RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ), typeof( GUIStyle ), typeof( Vector2 ) } ) != null;
    }
 
    private static MethodBase TargetMethod()
@@ -360,7 +410,7 @@ internal static class GUI_Box_Hook
 {
    private static bool Prepare()
    {
-      return RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ) != null;
+      return AccessTools.Method( typeof( GUI ), "Box", new[] { typeof( Rect ), RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ), typeof( GUIStyle ) } ) != null;
    }
 
    private static MethodBase TargetMethod()
@@ -379,7 +429,7 @@ internal static class GUI_DoLabel_Hook
 {
    private static bool Prepare()
    {
-      return RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ) != null;
+      return AccessTools.Method( typeof( GUI ), "DoLabel", new[] { typeof( Rect ), RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ), typeof( IntPtr ) } ) != null;
    }
 
    private static MethodBase TargetMethod()
@@ -398,7 +448,7 @@ internal static class GUI_DoLabel_Hook_New
 {
    private static bool Prepare()
    {
-      return RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ) != null;
+      return AccessTools.Method( typeof( GUI ), "DoLabel", new[] { typeof( Rect ), RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ), typeof( GUIStyle ) } ) != null;
    }
 
    private static MethodBase TargetMethod()
@@ -417,7 +467,7 @@ internal static class GUI_DoButton_Hook
 {
    private static bool Prepare()
    {
-      return RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ) != null;
+      return AccessTools.Method( typeof( GUI ), "DoButton", new[] { typeof( Rect ), RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ), typeof( IntPtr ) } ) != null;
    }
 
    private static MethodBase TargetMethod()
@@ -436,7 +486,7 @@ internal static class GUI_DoButton_Hook_New
 {
    private static bool Prepare()
    {
-      return RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ) != null;
+      return AccessTools.Method( typeof( GUI ), "DoButton", new[] { typeof( Rect ), typeof( int ), RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ), typeof( GUIStyle ) } ) != null;
    }
 
    private static MethodBase TargetMethod()
@@ -455,7 +505,8 @@ internal static class GUI_DoButtonGrid_Hook
 {
    private static bool Prepare()
    {
-      return RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ) != null;
+      var guiContentArrayType = RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" )?.MakeArrayType();
+      return AccessTools.Method( typeof( GUI ), "DoButtonGrid", new[] { typeof( Rect ), typeof( int ), guiContentArrayType, typeof( int ), typeof( GUIStyle ), typeof( GUIStyle ), typeof( GUIStyle ), typeof( GUIStyle ) } ) != null;
    }
 
    private static MethodBase TargetMethod()
@@ -475,7 +526,9 @@ internal static class GUI_DoButtonGrid_Hook_2018
 {
    private static bool Prepare()
    {
-      return RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUI+ToolbarButtonSize" ) != null;
+      var toolbarButtonSizeType = RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUI+ToolbarButtonSize" );
+      var guiContentArrayType = RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" )?.MakeArrayType();
+      return AccessTools.Method( typeof( GUI ), "DoButtonGrid", new[] { typeof( Rect ), typeof( int ), guiContentArrayType, typeof( string[] ), typeof( int ), typeof( GUIStyle ), typeof( GUIStyle ), typeof( GUIStyle ), typeof( GUIStyle ), toolbarButtonSizeType } ) != null;
    }
 
    private static MethodBase TargetMethod()
@@ -496,7 +549,9 @@ internal static class GUI_DoButtonGrid_Hook_2019
 {
    private static bool Prepare()
    {
-      return RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUI+ToolbarButtonSize" ) != null;
+      var toolbarButtonSizeType = RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUI+ToolbarButtonSize" );
+      var guiContentArrayType = RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" )?.MakeArrayType();
+      return AccessTools.Method( typeof( GUI ), "DoButtonGrid", new[] { typeof( Rect ), typeof( int ), guiContentArrayType, typeof( string[] ), typeof( int ), typeof( GUIStyle ), typeof( GUIStyle ), typeof( GUIStyle ), typeof( GUIStyle ), toolbarButtonSizeType, typeof( bool[] ) } ) != null;
    }
 
    private static MethodBase TargetMethod()
@@ -517,7 +572,7 @@ internal static class GUI_DoToggle_Hook
 {
    private static bool Prepare()
    {
-      return RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ) != null;
+      return AccessTools.Method( typeof( GUI ), "DoToggle", new[] { typeof( Rect ), typeof( int ), typeof( bool ), RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ), typeof( IntPtr ) } ) != null;
    }
 
    private static MethodBase TargetMethod()
@@ -536,7 +591,7 @@ internal static class GUI_DoToggle_Hook_New
 {
    private static bool Prepare()
    {
-      return RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ) != null;
+      return AccessTools.Method( typeof( GUI ), "DoToggle", new[] { typeof( Rect ), typeof( int ), typeof( bool ), RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ), typeof( GUIStyle ) } ) != null;
    }
 
    private static MethodBase TargetMethod()
@@ -555,7 +610,7 @@ internal static class GUI_DoRepeatButton_Hook
 {
    private static bool Prepare()
    {
-      return RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ) != null;
+      return AccessTools.Method( typeof( GUI ), "DoRepeatButton", new[] { typeof( Rect ), RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ), typeof( GUIStyle ), RuntimeTypeResolver.FindLoadedType( "UnityEngine.FocusType" ) } ) != null;
    }
 
    private static MethodBase TargetMethod()
@@ -574,7 +629,7 @@ internal static class GUI_DoModalWindow_Hook
 {
    private static bool Prepare()
    {
-      return RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ) != null;
+      return AccessTools.Method( typeof( GUI ), "DoModalWindow", new[] { typeof( int ), typeof( Rect ), typeof( GUI.WindowFunction ), RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ), typeof( GUIStyle ), typeof( GUISkin ) } ) != null;
    }
 
    private static MethodBase TargetMethod()
@@ -593,7 +648,7 @@ internal static class GUI_DoWindow_Hook
 {
    private static bool Prepare()
    {
-      return RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ) != null;
+      return AccessTools.Method( typeof( GUI ), "DoWindow", new[] { typeof( int ), typeof( Rect ), typeof( GUI.WindowFunction ), RuntimeTypeResolver.FindLoadedType( "UnityEngine.GUIContent" ), typeof( GUIStyle ), typeof( GUISkin ), typeof( bool ) } ) != null;
    }
 
    private static MethodBase TargetMethod()
