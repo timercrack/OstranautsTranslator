@@ -81,6 +81,8 @@ $outputRootPath = [System.IO.Path]::GetFullPath( $OutputRoot )
 $stageRootPath = Join-Path $outputRootPath "package"
 $zipFileName = "OstranautsTranslator-$Tag.zip"
 $zipPath = Join-Path $outputRootPath $zipFileName
+$releaseNotesEnglishPath = Join-Path $outputRootPath "release-notes.en.md"
+$releaseNotesChinesePath = Join-Path $outputRootPath "release-notes.zh-CN.md"
 $releaseNotesPath = Join-Path $outputRootPath "release-notes.md"
 
 if( -not $SkipBuild ) {
@@ -158,9 +160,98 @@ Compatible game version: $gameVersion
 - This package targets Simplified Chinese.
 - config.ini and workspace data are intentionally excluded from the release package.
 - If the game updates, rerun OstranautsTranslator.exe or install a newer release package.
+"@ | Set-Content -LiteralPath $releaseNotesEnglishPath -Encoding UTF8
+
+@"
+# OstranautsTranslator $Tag
+
+兼容游戏版本：$gameVersion
+
+## 安装方法
+
+1. 关闭游戏。
+2. 下载 $zipFileName。
+3. 将压缩包直接解压到游戏根目录，也就是包含 Ostranauts.exe 的文件夹。
+4. 如果提示覆盖现有文件，选择覆盖。
+5. 启动游戏。按 F6 可以打开状态窗口。
+
+## 包含内容
+
+- BepInEx/plugins/OstranautsTranslator
+- OstranautsTranslator
+- Ostranauts_Data/Mods/loading_order.json
+- Ostranauts_Data/Mods/OstranautsTranslate
+
+## 说明
+
+- 该发布包面向简体中文。
+- release 包中有意排除了 config.ini 和工作区数据。
+- 如果游戏更新，请重新运行 OstranautsTranslator.exe，或安装更新版本的 release 包。
+"@ | Set-Content -LiteralPath $releaseNotesChinesePath -Encoding UTF8
+
+@"
+Language / 语言: [English](#english) | [简体中文](#zh-cn)
+
+<a id="english"></a>
+
+# OstranautsTranslator $Tag
+
+Compatible game version: $gameVersion
+
+## Installation
+
+1. Close the game.
+2. Download $zipFileName.
+3. Extract the archive directly into the game root, the folder that contains Ostranauts.exe.
+4. Overwrite existing files when prompted.
+5. Launch the game. Press F6 to open the status window.
+
+## Included content
+
+- BepInEx/plugins/OstranautsTranslator
+- OstranautsTranslator
+- Ostranauts_Data/Mods/loading_order.json
+- Ostranauts_Data/Mods/OstranautsTranslate
+
+## Notes
+
+- This package targets Simplified Chinese.
+- config.ini and workspace data are intentionally excluded from the release package.
+- If the game updates, rerun OstranautsTranslator.exe or install a newer release package.
+
+---
+
+<a id="zh-cn"></a>
+
+# OstranautsTranslator $Tag
+
+兼容游戏版本：$gameVersion
+
+## 安装方法
+
+1. 关闭游戏。
+2. 下载 $zipFileName。
+3. 将压缩包直接解压到游戏根目录，也就是包含 Ostranauts.exe 的文件夹。
+4. 如果提示覆盖现有文件，选择覆盖。
+5. 启动游戏。按 F6 可以打开状态窗口。
+
+## 包含内容
+
+- BepInEx/plugins/OstranautsTranslator
+- OstranautsTranslator
+- Ostranauts_Data/Mods/loading_order.json
+- Ostranauts_Data/Mods/OstranautsTranslate
+
+## 说明
+
+- 该发布包面向简体中文。
+- release 包中有意排除了 config.ini 和工作区数据。
+- 如果游戏更新，请重新运行 OstranautsTranslator.exe，或安装更新版本的 release 包。
 "@ | Set-Content -LiteralPath $releaseNotesPath -Encoding UTF8
 
 Compress-Archive -Path ( Join-Path $stageRootPath "*" ) -DestinationPath $zipPath -CompressionLevel Optimal
 
 Write-Host "Release package created: $zipPath"
+Write-Host "English release notes created: $releaseNotesEnglishPath"
+Write-Host "Simplified Chinese release notes created: $releaseNotesChinesePath"
 Write-Host "Release notes created: $releaseNotesPath"

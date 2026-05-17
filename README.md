@@ -1,5 +1,7 @@
 # OstranautsTranslator
 
+Language / 语言: [English](README.md) | [简体中文](README.zh-CN.md)
+
 `OstranautsTranslator.exe` is a command-line tool deployed into the `Ostranauts` game directory. It is used to:
 
 - scan game text and build the workspace database
@@ -96,7 +98,7 @@ By default, the script:
 - copies the deployed tool directory from `<game root>\OstranautsTranslator`
 - excludes `config.ini` and workspace data from the release package
 - copies `loading_order.json` and the deployed `OstranautsTranslate` mod
-- writes the zip and a ready-to-use release note file under `artifacts\release\v<version>\`
+- writes the zip plus English, Simplified Chinese, and bilingual release note files under `artifacts\release\v<version>\`
 
 The generated zip is structured so it can be extracted directly into the game root.
 
