@@ -8,11 +8,11 @@ OstranautsTranslator 是一个面向 Ostranauts 玩家使用的简体中文翻�
 
 ## 包含内容
 
-- 运行所需的 BepInEx 文件
+- 运行所需的 BepInEx DLL 和配置文件
 - doorstop 启动文件
 - OstranautsTranslator 插件
 - 中文 mod 文件
-- 这个翻译包使用的翻译数据和运行时设置
+- 这个翻译包必需的数据库和运行时数据文件
 
 ## 安装方法
 

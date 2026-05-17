@@ -8,11 +8,11 @@ It is meant for players first: download the release archive, extract it into the
 
 ## What It Includes
 
-- the required BepInEx runtime files
+- the required BepInEx runtime DLLs and config files
 - doorstop startup files
-- the OstranautsTranslator plugin
+- the OstranautsTranslator plugin files
 - the Chinese mod files
-- the translation data and runtime settings used by the package
+- the required translation database and runtime data files
 
 ## Installation
 

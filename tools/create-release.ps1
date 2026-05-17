@@ -52,6 +52,27 @@ function Copy-DirectoryContents {
    }
 }
 
+function Copy-SelectedFiles {
+   param(
+      [Parameter( Mandatory = $true )]
+      [string]$SourcePath,
+      [Parameter( Mandatory = $true )]
+      [string]$DestinationPath,
+      [Parameter( Mandatory = $true )]
+      [string[]]$FileNames
+   )
+
+   New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+   foreach( $fileName in $FileNames ) {
+      $sourceFilePath = Join-Path $SourcePath $fileName
+      if( -not ( Test-Path -LiteralPath $sourceFilePath ) ) {
+         throw "Required release file was not found: '$sourceFilePath'."
+      }
+
+      Copy-Item -LiteralPath $sourceFilePath -Destination ( Join-Path $DestinationPath $fileName ) -Force
+   }
+}
+
 $repoRootPath = ( Resolve-Path -LiteralPath $RepoRoot ).Path
 $propsPath = Join-Path $repoRootPath "Directory.Build.props"
 
@@ -103,7 +124,12 @@ if( -not $SkipBuild ) {
 }
 
 $bepInExSourcePath = Join-Path $gameRootResolvedPath "BepInEx"
+$bepInExCoreSourcePath = Join-Path $bepInExSourcePath "core"
+$bepInExConfigSourcePath = Join-Path $bepInExSourcePath "config"
+$pluginSourcePath = Join-Path $bepInExSourcePath "plugins/OstranautsTranslator"
 $toolSourcePath = Join-Path $gameRootResolvedPath "OstranautsTranslator"
+$workspaceSourcePath = Join-Path $toolSourcePath "workspace"
+$workspaceDatabaseSourcePath = Join-Path $workspaceSourcePath "corpus.sqlite"
 $modsRootPath = Join-Path $gameRootResolvedPath "Ostranauts_Data/Mods"
 $loadingOrderSourcePath = Join-Path $modsRootPath "loading_order.json"
 $modSourcePath = Join-Path $modsRootPath "OstranautsTranslate"
@@ -111,7 +137,7 @@ $modInfoPath = Join-Path $modSourcePath "mod_info.json"
 $doorstopConfigSourcePath = Join-Path $gameRootResolvedPath "doorstop_config.ini"
 $winHttpSourcePath = Join-Path $gameRootResolvedPath "winhttp.dll"
 
-foreach( $requiredPath in @( $bepInExSourcePath, $toolSourcePath, $loadingOrderSourcePath, $modSourcePath, $modInfoPath, $doorstopConfigSourcePath, $winHttpSourcePath ) ) {
+foreach( $requiredPath in @( $bepInExCoreSourcePath, $bepInExConfigSourcePath, $pluginSourcePath, $toolSourcePath, $workspaceDatabaseSourcePath, $loadingOrderSourcePath, $modSourcePath, $modInfoPath, $doorstopConfigSourcePath, $winHttpSourcePath ) ) {
    if( -not ( Test-Path -LiteralPath $requiredPath ) ) {
       throw "Required release input was not found: '$requiredPath'."
    }
@@ -123,8 +149,43 @@ if( Test-Path -LiteralPath $outputRootPath ) {
 
 New-Item -ItemType Directory -Path $outputRootPath -Force | Out-Null
 
-Copy-DirectoryContents -SourcePath $bepInExSourcePath -DestinationPath ( Join-Path $stageRootPath "BepInEx" ) -ExcludeNames @( "cache", "LogOutput.log" )
-Copy-DirectoryContents -SourcePath $toolSourcePath -DestinationPath ( Join-Path $stageRootPath "OstranautsTranslator" ) -ExcludeNames @( "config.ini" )
+Copy-SelectedFiles -SourcePath $bepInExCoreSourcePath -DestinationPath ( Join-Path $stageRootPath "BepInEx/core" ) -FileNames @(
+   "0Harmony.dll",
+   "0Harmony20.dll",
+   "BepInEx.dll",
+   "BepInEx.Harmony.dll",
+   "BepInEx.Preloader.dll",
+   "HarmonyXInterop.dll",
+   "Mono.Cecil.dll",
+   "Mono.Cecil.Mdb.dll",
+   "Mono.Cecil.Pdb.dll",
+   "Mono.Cecil.Rocks.dll",
+   "MonoMod.RuntimeDetour.dll",
+   "MonoMod.Utils.dll",
+   "XUnity.Common.dll"
+)
+Copy-SelectedFiles -SourcePath $bepInExConfigSourcePath -DestinationPath ( Join-Path $stageRootPath "BepInEx/config" ) -FileNames @(
+   "BepInEx.cfg",
+   "OstranautsTranslator.cfg"
+)
+Copy-DirectoryContents -SourcePath $pluginSourcePath -DestinationPath ( Join-Path $stageRootPath "BepInEx/plugins/OstranautsTranslator" )
+Copy-SelectedFiles -SourcePath $toolSourcePath -DestinationPath ( Join-Path $stageRootPath "OstranautsTranslator" ) -FileNames @(
+   "Microsoft.Data.Sqlite.dll",
+   "Mono.Cecil.dll",
+   "Mono.Cecil.Mdb.dll",
+   "Mono.Cecil.Pdb.dll",
+   "Mono.Cecil.Rocks.dll",
+   "OstranautsTranslator.Core.dll",
+   "OstranautsTranslator.deps.json",
+   "OstranautsTranslator.dll",
+   "OstranautsTranslator.exe",
+   "OstranautsTranslator.runtimeconfig.json",
+   "runtime-fixed-source.json",
+   "SQLitePCLRaw.core.dll",
+   "SQLitePCLRaw.provider.winsqlite3.dll"
+)
+New-Item -ItemType Directory -Path ( Join-Path $stageRootPath "OstranautsTranslator/workspace" ) -Force | Out-Null
+Copy-Item -LiteralPath $workspaceDatabaseSourcePath -Destination ( Join-Path $stageRootPath "OstranautsTranslator/workspace/corpus.sqlite" ) -Force
 Copy-Item -LiteralPath $doorstopConfigSourcePath -Destination ( Join-Path $stageRootPath "doorstop_config.ini" ) -Force
 Copy-Item -LiteralPath $winHttpSourcePath -Destination ( Join-Path $stageRootPath "winhttp.dll" ) -Force
 New-Item -ItemType Directory -Path ( Join-Path $stageRootPath "Ostranauts_Data/Mods" ) -Force | Out-Null
@@ -157,7 +218,7 @@ Compatible game version: $gameVersion
 ## Notes
 
 - This release is meant to be extracted directly into the game folder.
-- It already includes the required runtime files, translation plugin, Chinese mod, and translation data.
+- It includes only the required runtime files, config files, database file, translation mod, and DLLs.
 - If the game updates and the translation looks outdated, run OstranautsTranslator.exe once, then launch the game again.
 - config.ini is not included in the public release package.
 
@@ -184,7 +245,7 @@ Compatible game version: $gameVersion
 ## 说明
 
 - 这个 release 设计为直接解压到游戏目录使用。
-- 包里已经包含所需运行时文件、翻译插件、中文 mod 和翻译数据。
+- 包里只保留必需的运行时文件、配置文件、数据库文件、翻译 mod 和 DLL。
 - 如果游戏更新后翻译显得过时，请先运行一次 OstranautsTranslator.exe，再启动游戏。
 - 公开 release 不包含 config.ini。
 
@@ -215,7 +276,7 @@ Compatible game version: $gameVersion
 ## Notes
 
 - This release is meant to be extracted directly into the game folder.
-- It already includes the required runtime files, translation plugin, Chinese mod, and translation data.
+- It includes only the required runtime files, config files, database file, translation mod, and DLLs.
 - If the game updates and the translation looks outdated, run OstranautsTranslator.exe once, then launch the game again.
 - config.ini is not included in the public release package.
 
@@ -244,7 +305,7 @@ Compatible game version: $gameVersion
 ## 说明
 
 - 这个 release 设计为直接解压到游戏目录使用。
-- 包里已经包含所需运行时文件、翻译插件、中文 mod 和翻译数据。
+- 包里只保留必需的运行时文件、配置文件、数据库文件、翻译 mod 和 DLL。
 - 如果游戏更新后翻译显得过时，请先运行一次 OstranautsTranslator.exe，再启动游戏。
 - 公开 release 不包含 config.ini。
 
