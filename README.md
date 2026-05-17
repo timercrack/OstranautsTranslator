@@ -8,6 +8,19 @@
 - call DeepSeek to translate glossary terms and body text in batches
 - export or deploy the in-game translation mod
 
+## Install from Release
+
+For end users, download the release zip and extract it directly into the game root, the folder that contains `Ostranauts.exe`.
+
+The release package contains these paths:
+
+- `BepInEx\plugins\OstranautsTranslator\`
+- `OstranautsTranslator\`
+- `Ostranauts_Data\Mods\loading_order.json`
+- `Ostranauts_Data\Mods\OstranautsTranslate\`
+
+Close the game before extracting the archive. After extraction, start the game and press `F6` if you want to open the status window.
+
 ## Where to Run It
 
 - After a solution build, the tool is copied to: `<game root>\OstranautsTranslator\`
@@ -69,6 +82,23 @@ By default, the solution build will:
 - copy `tmp\generate_generic_glossary.py` into the build output and the deployed exe directory as `generate_generic_glossary.py`
 
 At runtime, the plugin reads the real game version shown in the UI from the game's Unity resource `Resources/version` and stores it in `BepInEx\config\OstranautsTranslator.cfg`. If the version changes, the plugin warns you in the log and status window to run `OstranautsTranslator.exe` again and refresh the translation. After a game update, it is best to launch the game once so the plugin can record the new version before you export or deploy again.
+
+## Create a Release Zip
+
+Run this from the repository root:
+
+- `.\tools\create-release.ps1`
+
+By default, the script:
+
+- runs the solution-level `Release` build
+- copies the deployed plugin package from `<game root>\BepInEx\plugins\OstranautsTranslator`
+- copies the deployed tool directory from `<game root>\OstranautsTranslator`
+- excludes `config.ini` and workspace data from the release package
+- copies `loading_order.json` and the deployed `OstranautsTranslate` mod
+- writes the zip and a ready-to-use release note file under `artifacts\release\v<version>\`
+
+The generated zip is structured so it can be extracted directly into the game root.
 
 ## Configuration File
 
