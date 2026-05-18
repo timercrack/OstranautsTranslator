@@ -562,6 +562,53 @@ internal static class PdaRuntimeTranslationHelper
          ] );
    }
 
+   public static string TranslatePersonModuleDescription( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      var normalized = value.Replace( "\r\n", "\n" );
+      var lines = normalized.Split( '\n' );
+      var changed = false;
+
+      for( var i = 0; i < lines.Length; i++ )
+      {
+         var line = lines[ i ];
+         if( string.IsNullOrEmpty( line ) ) continue;
+
+         var translatedLine = line;
+         translatedLine = ReplaceOrdinal( translatedLine, "Age: ", "年龄：" );
+         translatedLine = ReplaceOrdinal( translatedLine, "Gender: ", "性别：" );
+         translatedLine = ReplaceOrdinal( translatedLine, "Career: ", "职业：" );
+         translatedLine = ReplaceOrdinal( translatedLine, "Homeworld: ", "母星：" );
+         translatedLine = ReplaceOrdinal( translatedLine, "Strata: ", "阶层：" );
+         translatedLine = ReplaceOrdinal( translatedLine, "Factions: ", "派系：" );
+         translatedLine = ReplaceOrdinal( translatedLine, "My Standings: ", "我方评价：" );
+         translatedLine = ReplaceOrdinal( translatedLine, "They See Us As: ", "他们眼中的我们：" );
+         translatedLine = ReplaceOrdinal( translatedLine, "We See Them As: ", "我们眼中的他们：" );
+         translatedLine = ReplaceOrdinal( translatedLine, "Fear: ", "恐惧：" );
+
+         translatedLine = ReplaceOrdinal( translatedLine, "n/a", "无" );
+         translatedLine = ReplaceOrdinal( translatedLine, "N/A", "无" );
+         translatedLine = ReplaceOrdinal( translatedLine, "None Revealed Yet", "尚未揭示任何内容" );
+         translatedLine = ReplaceOrdinal( translatedLine, "None", "无" );
+         translatedLine = ReplaceOrdinal( translatedLine, "OKLG Civilian", "OKLG 平民" );
+
+         if( !string.Equals( translatedLine, line, StringComparison.Ordinal ) )
+         {
+            lines[ i ] = translatedLine;
+            changed = true;
+         }
+      }
+
+      return changed ? string.Join( "\n", lines ) : value;
+   }
+
    public static string TranslateFerryDestinationLabel( string value, string hookName )
    {
       if( string.IsNullOrWhiteSpace( value ) ) return value;
@@ -1252,13 +1299,32 @@ internal static class SettingsRuntimeTranslationHelper
 {
    private static readonly IReadOnlyDictionary<string, string> ExactTextMap = new Dictionary<string, string>( StringComparer.Ordinal )
    {
+   [ "Off" ] = "关",
       [ "5 mins" ] = "5分钟",
       [ "10 mins" ] = "10分钟",
+   [ "15 mins" ] = "15分钟",
       [ "20 mins" ] = "20分钟",
       [ "30 mins" ] = "30分钟",
       [ "60 mins" ] = "60分钟",
       [ "Soft" ] = "柔和",
       [ "Kelvin" ] = "开尔文",
+   };
+
+   private static readonly IReadOnlyDictionary<string, string> TurboButtonTextMap = new Dictionary<string, string>( StringComparer.Ordinal )
+   {
+      [ "HYPER" ] = "狂飙",
+      [ "PLUS" ] = "增强",
+      [ "MEGA" ] = "巨能",
+      [ "SUPER" ] = "超级",
+      [ "FAST" ] = "迅捷",
+      [ "YES" ] = "开启",
+      [ "狂飙" ] = "狂飙",
+      [ "增强" ] = "增强",
+      [ "巨能" ] = "巨能",
+      [ "超级" ] = "超级",
+      [ "迅捷" ] = "迅捷",
+      [ "开启" ] = "开启",
+      [ "是" ] = "开启",
    };
 
    private static readonly string[] DropdownFieldNames =
@@ -1281,11 +1347,23 @@ internal static class SettingsRuntimeTranslationHelper
       }
 
       RuntimeTextHookHelper.TranslateHierarchy( root, "GUIOptions.Init.post" );
+      ReplaceKnownVideoOptionLabels( root );
+      ReplaceTurboPanelTexts( root );
+   }
+
+   public static void TranslateTurboButtonUi( object guiOptions )
+   {
+      ReplaceTurboPanelTexts( RuntimeTextHookHelper.GetGameObject( guiOptions ) );
    }
 
    public static string TranslateOptionText( string value )
    {
       if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      if( ExactTextMap.TryGetValue( value, out var exactText ) )
+      {
+         return exactText;
+      }
 
       var translated = RuntimeTextHookHelper.TranslateTextValue( value, "GUIOptions.Option" );
       if( !string.Equals( translated, value, StringComparison.Ordinal ) )
@@ -1293,7 +1371,138 @@ internal static class SettingsRuntimeTranslationHelper
          return translated;
       }
 
-      return ExactTextMap.TryGetValue( value, out var exactText ) ? exactText : value;
+      return value;
+   }
+
+   private static void ReplaceKnownVideoOptionLabels( UnityEngine.GameObject root )
+   {
+      if( root == null ) return;
+
+      var getComponentsInChildren = typeof( UnityEngine.GameObject ).GetMethod( "GetComponentsInChildren", new[] { typeof( Type ), typeof( bool ) } );
+      if( getComponentsInChildren?.Invoke( root, new object[] { typeof( UnityEngine.Component ), true } ) is not IEnumerable components ) return;
+
+      foreach( var component in components )
+      {
+         if( component == null ) continue;
+
+         var textProperty = RuntimeHookTranslationHelper.GetStringProperty( component.GetType(), "text" );
+         if( textProperty == null || !textProperty.CanRead || !textProperty.CanWrite || textProperty.PropertyType != typeof( string ) ) continue;
+
+         var currentText = textProperty.GetValue( component ) as string;
+         if( !string.Equals( currentText, "Turbo", StringComparison.Ordinal )
+            && !string.Equals( currentText, "涡轮", StringComparison.Ordinal ) ) continue;
+
+         textProperty.SetValue( component, "加速按钮" );
+      }
+   }
+
+   private static void ReplaceTurboPanelTexts( UnityEngine.GameObject root )
+   {
+      if( root == null ) return;
+
+      var turboPanel = FindChildGameObject( root, "pnlVideo/pnlTurbo" );
+      if( turboPanel == null ) return;
+
+      var toggleRoot = FindChildGameObject( turboPanel, "chkB" );
+      ReplaceTurboTitleText( turboPanel, toggleRoot );
+      ReplaceTurboButtonTexts( toggleRoot );
+   }
+
+   private static void ReplaceTurboTitleText( UnityEngine.GameObject turboPanel, UnityEngine.GameObject toggleRoot )
+   {
+      if( turboPanel == null ) return;
+
+      var titleCandidates = new List<object>();
+
+      foreach( var component in EnumerateTextComponents( turboPanel ) )
+      {
+         var componentGameObject = RuntimeTextHookHelper.GetGameObject( component );
+         if( componentGameObject == null ) continue;
+         if( IsSameOrDescendant( componentGameObject, toggleRoot ) ) continue;
+
+         var textProperty = RuntimeHookTranslationHelper.GetStringProperty( component.GetType(), "text" );
+         var currentText = textProperty?.GetValue( component ) as string;
+         if( string.IsNullOrWhiteSpace( currentText ) ) continue;
+
+         titleCandidates.Add( component );
+         var normalizedText = currentText.Trim();
+         if( !string.Equals( normalizedText, "Turbo", StringComparison.Ordinal )
+            && !string.Equals( normalizedText, "涡轮", StringComparison.Ordinal ) ) continue;
+
+         textProperty.SetValue( component, "加速按钮" );
+         return;
+      }
+
+      if( titleCandidates.Count == 1 )
+      {
+         RuntimeHookTranslationHelper.SetTextComponentProperty( titleCandidates[ 0 ], "加速按钮" );
+      }
+   }
+
+   private static void ReplaceTurboButtonTexts( UnityEngine.GameObject toggleRoot )
+   {
+      if( toggleRoot == null ) return;
+
+      foreach( var component in EnumerateTextComponents( toggleRoot ) )
+      {
+         var textProperty = RuntimeHookTranslationHelper.GetStringProperty( component.GetType(), "text" );
+         var currentText = textProperty?.GetValue( component ) as string;
+         if( string.IsNullOrWhiteSpace( currentText ) ) continue;
+
+         if( !TurboButtonTextMap.TryGetValue( currentText.Trim(), out var translatedText ) ) continue;
+         textProperty.SetValue( component, translatedText );
+      }
+   }
+
+   private static IEnumerable EnumerateTextComponents( UnityEngine.GameObject root )
+   {
+      if( root == null ) yield break;
+
+      var getComponentsInChildren = typeof( UnityEngine.GameObject ).GetMethod( "GetComponentsInChildren", new[] { typeof( Type ), typeof( bool ) } );
+      if( getComponentsInChildren?.Invoke( root, new object[] { typeof( UnityEngine.Component ), true } ) is not IEnumerable components ) yield break;
+
+      foreach( var component in components )
+      {
+         if( component == null ) continue;
+
+         var textProperty = RuntimeHookTranslationHelper.GetStringProperty( component.GetType(), "text" );
+         if( textProperty == null || !textProperty.CanRead || !textProperty.CanWrite || textProperty.PropertyType != typeof( string ) ) continue;
+
+         yield return component;
+      }
+   }
+
+   private static UnityEngine.GameObject FindChildGameObject( UnityEngine.GameObject root, string path )
+   {
+      if( root == null || string.IsNullOrWhiteSpace( path ) ) return null;
+
+      var transformProperty = typeof( UnityEngine.GameObject ).GetProperty( "transform", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      var transform = transformProperty?.GetValue( root, null );
+      if( transform == null ) return null;
+
+      var findMethod = transform.GetType().GetMethod( "Find", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof( string ) }, null );
+      var childTransform = findMethod?.Invoke( transform, new object[] { path } );
+      return RuntimeTextHookHelper.GetGameObject( childTransform );
+   }
+
+   private static bool IsSameOrDescendant( UnityEngine.GameObject candidate, UnityEngine.GameObject ancestor )
+   {
+      if( candidate == null || ancestor == null ) return false;
+      if( ReferenceEquals( candidate, ancestor ) ) return true;
+
+      var current = candidate;
+      while( current != null )
+      {
+         if( ReferenceEquals( current, ancestor ) ) return true;
+
+         var transformProperty = typeof( UnityEngine.GameObject ).GetProperty( "transform", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+         var transform = transformProperty?.GetValue( current, null );
+         var parentProperty = transform?.GetType().GetProperty( "parent", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+         var parentTransform = parentProperty?.GetValue( transform, null );
+         current = RuntimeTextHookHelper.GetGameObject( parentTransform );
+      }
+
+      return false;
    }
 }
 
@@ -2196,6 +2405,12 @@ internal static class MegaToolTipRuntimeTranslationHelper
    private static readonly Regex ItemSentencePattern = new Regex( "^The (?<subject>.+?) is (?<article>an? )?(?<descriptor>.+?) item\\.$", RegexOptions.CultureInvariant );
    private static readonly Regex ItemTokenSentencePattern = new Regex( "^\\[us\\] \\[is\\] (?<article>an? )?(?<descriptor>.+?) item\\.$", RegexOptions.CultureInvariant );
    private static readonly Regex StateSentencePattern = new Regex( "^The (?<subject>.+?) is (?<article>an? )?(?<descriptor>.+?)\\.$", RegexOptions.CultureInvariant );
+   private static readonly IReadOnlyDictionary<string, string> FactionFriendlyNameMap = new Dictionary<string, string>( StringComparer.Ordinal )
+   {
+      [ "AyoSec" ] = "AyoSec",
+      [ "Ayotimiwa Ship Breaking Co." ] = "阿约蒂米瓦拆船公司",
+      [ "OKLG Civilian" ] = "OKLG 平民"
+   };
 
    public static string TranslateTooltipTitle( string value, string hookName )
    {
@@ -2265,7 +2480,7 @@ internal static class MegaToolTipRuntimeTranslationHelper
 
          if( line.StartsWith( "Factions: ", StringComparison.Ordinal ) )
          {
-            lines[ i ] = "派系：" + line.Substring( "Factions: ".Length );
+            lines[ i ] = "派系：" + TranslateFactionList( line.Substring( "Factions: ".Length ), hookName + "[" + i + "].factions" );
          }
          else if( string.Equals( line, "n/a", StringComparison.Ordinal ) )
          {
@@ -2278,6 +2493,42 @@ internal static class MegaToolTipRuntimeTranslationHelper
       }
 
       return string.Join( "\n", lines );
+   }
+
+   private static string TranslateFactionList( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var parts = value.Split( new[] { ", " }, StringSplitOptions.None );
+      var changed = false;
+
+      for( var i = 0; i < parts.Length; i++ )
+      {
+         var part = parts[ i ];
+         if( string.IsNullOrWhiteSpace( part ) ) continue;
+
+         var translatedPart = TranslateFactionFriendlyName( part, hookName + "." + i );
+         if( !string.Equals( translatedPart, part, StringComparison.Ordinal ) )
+         {
+            parts[ i ] = translatedPart;
+            changed = true;
+         }
+      }
+
+      return changed ? string.Join( ", ", parts ) : value;
+   }
+
+   private static string TranslateFactionFriendlyName( string value, string hookName )
+   {
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      return FactionFriendlyNameMap.TryGetValue( value, out var mapped )
+         ? mapped
+         : value;
    }
 
    private static string BuildTranslatedItemSentence( string subject, string descriptor, string hookName )
@@ -2847,6 +3098,55 @@ internal static class MegaToolTip_ItemModule_SetData_Hook
       RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "_txtFullName", value => TooltipRuntimeTranslationHelper.TranslateCondOwnerDisplayName( value, __0, "MegaToolTip.ItemModule.SetData._txtFullName" ) );
       RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "_txtDescription", value => MegaToolTipRuntimeTranslationHelper.TranslateItemDescription( value, __0, "MegaToolTip.ItemModule.SetData._txtDescription" ) );
       RuntimeTextHookHelper.TranslateObjectHierarchyIfChanged( RuntimeTextHookHelper.GetGameObject( __instance ), "MegaToolTip.ItemModule.SetData" );
+   }
+}
+
+[HarmonyPatch]
+internal static class MegaToolTip_PersonModule_SetData_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.UI.MegaToolTip.DataModules.PersonModule" ) != null
+         && GameTypeResolver.Get( "CondOwner" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "Ostranauts.UI.MegaToolTip.DataModules.PersonModule" ),
+         "SetData",
+         new[] { GameTypeResolver.Get( "CondOwner" ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged(
+         __instance,
+         "_txtDescription",
+         value => PdaRuntimeTranslationHelper.TranslatePersonModuleDescription( value, "MegaToolTip.PersonModule.SetData._txtDescription" ) );
+      RuntimeTextHookHelper.TranslateObjectHierarchyIfChanged( RuntimeTextHookHelper.GetGameObject( __instance ), "MegaToolTip.PersonModule.SetData" );
+   }
+}
+
+[HarmonyPatch]
+internal static class MegaToolTip_PersonModule_OnUpdateUI_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.UI.MegaToolTip.DataModules.PersonModule" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "Ostranauts.UI.MegaToolTip.DataModules.PersonModule" ), "OnUpdateUI", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged(
+         __instance,
+         "_txtDescription",
+         value => PdaRuntimeTranslationHelper.TranslatePersonModuleDescription( value, "MegaToolTip.PersonModule.OnUpdateUI._txtDescription" ) );
    }
 }
 
@@ -3835,6 +4135,25 @@ internal static class GUIOptions_Init_Hook
    private static void Postfix( object __instance )
    {
       SettingsRuntimeTranslationHelper.TranslateOptionsUi( __instance );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIOptions_TurboB_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIOptions" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "GUIOptions" ), "TurboB", new[] { typeof( bool ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      SettingsRuntimeTranslationHelper.TranslateTurboButtonUi( __instance );
    }
 }
 

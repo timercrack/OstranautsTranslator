@@ -13,6 +13,7 @@ It is meant for players first: download the release archive, extract it into the
 - the OstranautsTranslator plugin files
 - the Chinese mod files
 - the required translation database and runtime data files
+- config-example.ini, the bundled glossary generator script, and the reference glossary JSON files used by the translation workflow
 
 ## Installation
 
@@ -28,6 +29,7 @@ It is meant for players first: download the release archive, extract it into the
 - In normal use, you only need to launch the game after installation.
 - Press `F6` in game if you want to open the translator status window.
 - If the game updates and the translation looks outdated, run `OstranautsTranslator.exe` once from the `OstranautsTranslator` folder, then launch the game again.
+- If you want to run the CLI translation workflow yourself, copy `config-example.ini` to `config.ini` in the `OstranautsTranslator` folder and fill in your own API key first.
 
 ## Updating
 

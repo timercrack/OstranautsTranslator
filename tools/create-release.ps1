@@ -73,6 +73,26 @@ function Copy-SelectedFiles {
    }
 }
 
+function Copy-FilesByPattern {
+   param(
+      [Parameter( Mandatory = $true )]
+      [string]$SourcePath,
+      [Parameter( Mandatory = $true )]
+      [string]$DestinationPath,
+      [Parameter( Mandatory = $true )]
+      [string]$Filter
+   )
+
+   if( -not ( Test-Path -LiteralPath $SourcePath ) ) {
+      throw "Required release directory was not found: '$SourcePath'."
+   }
+
+   New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+   Get-ChildItem -LiteralPath $SourcePath -File -Filter $Filter | ForEach-Object {
+      Copy-Item -LiteralPath $_.FullName -Destination ( Join-Path $DestinationPath $_.Name ) -Force
+   }
+}
+
 $repoRootPath = ( Resolve-Path -LiteralPath $RepoRoot ).Path
 $propsPath = Join-Path $repoRootPath "Directory.Build.props"
 
@@ -130,6 +150,9 @@ $pluginSourcePath = Join-Path $bepInExSourcePath "plugins/OstranautsTranslator"
 $toolSourcePath = Join-Path $gameRootResolvedPath "OstranautsTranslator"
 $workspaceSourcePath = Join-Path $toolSourcePath "workspace"
 $workspaceDatabaseSourcePath = Join-Path $workspaceSourcePath "corpus.sqlite"
+$workspaceReferenceSourcePath = Join-Path $workspaceSourcePath "reference"
+$toolConfigExampleSourcePath = Join-Path $toolSourcePath "config-example.ini"
+$toolGlossaryGeneratorSourcePath = Join-Path $toolSourcePath "generate_generic_glossary.py"
 $modsRootPath = Join-Path $gameRootResolvedPath "Ostranauts_Data/Mods"
 $loadingOrderSourcePath = Join-Path $modsRootPath "loading_order.json"
 $modSourcePath = Join-Path $modsRootPath "OstranautsTranslate"
@@ -137,7 +160,7 @@ $modInfoPath = Join-Path $modSourcePath "mod_info.json"
 $doorstopConfigSourcePath = Join-Path $gameRootResolvedPath "doorstop_config.ini"
 $winHttpSourcePath = Join-Path $gameRootResolvedPath "winhttp.dll"
 
-foreach( $requiredPath in @( $bepInExCoreSourcePath, $bepInExConfigSourcePath, $pluginSourcePath, $toolSourcePath, $workspaceDatabaseSourcePath, $loadingOrderSourcePath, $modSourcePath, $modInfoPath, $doorstopConfigSourcePath, $winHttpSourcePath ) ) {
+foreach( $requiredPath in @( $bepInExCoreSourcePath, $bepInExConfigSourcePath, $pluginSourcePath, $toolSourcePath, $workspaceDatabaseSourcePath, $workspaceReferenceSourcePath, $toolConfigExampleSourcePath, $toolGlossaryGeneratorSourcePath, $loadingOrderSourcePath, $modSourcePath, $modInfoPath, $doorstopConfigSourcePath, $winHttpSourcePath ) ) {
    if( -not ( Test-Path -LiteralPath $requiredPath ) ) {
       throw "Required release input was not found: '$requiredPath'."
    }
@@ -170,6 +193,8 @@ Copy-SelectedFiles -SourcePath $bepInExConfigSourcePath -DestinationPath ( Join-
 )
 Copy-DirectoryContents -SourcePath $pluginSourcePath -DestinationPath ( Join-Path $stageRootPath "BepInEx/plugins/OstranautsTranslator" )
 Copy-SelectedFiles -SourcePath $toolSourcePath -DestinationPath ( Join-Path $stageRootPath "OstranautsTranslator" ) -FileNames @(
+   "config-example.ini",
+   "generate_generic_glossary.py",
    "Microsoft.Data.Sqlite.dll",
    "Mono.Cecil.dll",
    "Mono.Cecil.Mdb.dll",
@@ -186,6 +211,7 @@ Copy-SelectedFiles -SourcePath $toolSourcePath -DestinationPath ( Join-Path $sta
 )
 New-Item -ItemType Directory -Path ( Join-Path $stageRootPath "OstranautsTranslator/workspace" ) -Force | Out-Null
 Copy-Item -LiteralPath $workspaceDatabaseSourcePath -Destination ( Join-Path $stageRootPath "OstranautsTranslator/workspace/corpus.sqlite" ) -Force
+Copy-FilesByPattern -SourcePath $workspaceReferenceSourcePath -DestinationPath ( Join-Path $stageRootPath "OstranautsTranslator/workspace/reference" ) -Filter "*.json"
 Copy-Item -LiteralPath $doorstopConfigSourcePath -Destination ( Join-Path $stageRootPath "doorstop_config.ini" ) -Force
 Copy-Item -LiteralPath $winHttpSourcePath -Destination ( Join-Path $stageRootPath "winhttp.dll" ) -Force
 New-Item -ItemType Directory -Path ( Join-Path $stageRootPath "Ostranauts_Data/Mods" ) -Force | Out-Null
@@ -219,6 +245,7 @@ Compatible game version: $gameVersion
 
 - This release is meant to be extracted directly into the game folder.
 - It includes only the required runtime files, config files, database file, translation mod, and DLLs.
+- It also includes config-example.ini, the bundled glossary generator script, and the workspace/reference glossary JSON files used by the translation workflow.
 - If the game updates and the translation looks outdated, run OstranautsTranslator.exe once, then launch the game again.
 - config.ini is not included in the public release package.
 
@@ -246,6 +273,7 @@ Compatible game version: $gameVersion
 
 - 这个 release 设计为直接解压到游戏目录使用。
 - 包里只保留必需的运行时文件、配置文件、数据库文件、翻译 mod 和 DLL。
+- 包内也包含 config-example.ini、术语表生成脚本，以及翻译流程会用到的 workspace/reference 术语 JSON 文件。
 - 如果游戏更新后翻译显得过时，请先运行一次 OstranautsTranslator.exe，再启动游戏。
 - 公开 release 不包含 config.ini。
 
@@ -277,6 +305,7 @@ Compatible game version: $gameVersion
 
 - This release is meant to be extracted directly into the game folder.
 - It includes only the required runtime files, config files, database file, translation mod, and DLLs.
+- It also includes config-example.ini, the bundled glossary generator script, and the workspace/reference glossary JSON files used by the translation workflow.
 - If the game updates and the translation looks outdated, run OstranautsTranslator.exe once, then launch the game again.
 - config.ini is not included in the public release package.
 
@@ -306,6 +335,7 @@ Compatible game version: $gameVersion
 
 - 这个 release 设计为直接解压到游戏目录使用。
 - 包里只保留必需的运行时文件、配置文件、数据库文件、翻译 mod 和 DLL。
+- 包内也包含 config-example.ini、术语表生成脚本，以及翻译流程会用到的 workspace/reference 术语 JSON 文件。
 - 如果游戏更新后翻译显得过时，请先运行一次 OstranautsTranslator.exe，再启动游戏。
 - 公开 release 不包含 config.ini。
 
