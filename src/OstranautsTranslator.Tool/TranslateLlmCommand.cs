@@ -105,6 +105,30 @@ internal static class TranslateLlmCommand
       }
 
       var selectedEntries = translationDatabase.GetEntriesForTranslation( translationSettings.IncludeDraft, translationSettings.OverwriteExisting );
+      if( !translationSettings.OverwriteExisting )
+      {
+         var staleNameEntries = translationDatabase
+            .GetFinalIdentityTranslationEntries()
+            .Where( ShouldRetranslateIdentityNameEntry )
+            .ToList();
+
+         if( staleNameEntries.Count > 0 )
+         {
+            var seenEntryKeys = new HashSet<string>(
+               selectedEntries.Select( entry => entry.SourceKind + ":" + entry.SourceId.ToString() ),
+               StringComparer.Ordinal );
+            var mergedEntries = selectedEntries.ToList();
+            foreach( var staleEntry in staleNameEntries )
+            {
+               var entryKey = staleEntry.SourceKind + ":" + staleEntry.SourceId.ToString();
+               if( !seenEntryKeys.Add( entryKey ) ) continue;
+               mergedEntries.Add( staleEntry );
+            }
+
+            selectedEntries = mergedEntries;
+         }
+      }
+
       if( selectedEntries.Count == 0 )
       {
          Console.WriteLine( "No translation entries matched the selection criteria." );
@@ -268,11 +292,29 @@ internal static class TranslateLlmCommand
             translatorName ) );
       }
 
-      var appliedForBatch = translationDatabase.ApplyTranslations( batchUpdates, translationSettings.OverwriteExisting );
+      var appliedForBatch = translationDatabase.ApplyTranslations( batchUpdates, translationSettings.OverwriteExisting || batch.Any( ShouldRetranslateIdentityNameEntry ) );
       return new BatchApplySummary(
          batchUpdates.Count,
          appliedForBatch,
          batchUpdates.Count - appliedForBatch );
+   }
+
+   private static bool ShouldRetranslateIdentityNameEntry( TranslationEntry entry )
+   {
+      if( entry == null ) return false;
+      if( !string.Equals( entry.TranslationState, "final", StringComparison.OrdinalIgnoreCase ) ) return false;
+      if( string.IsNullOrWhiteSpace( entry.TranslatedText ) ) return false;
+      if( !string.Equals( entry.TranslatedText, entry.RawText, StringComparison.Ordinal ) ) return false;
+
+      var sourcePath = entry.SampleSourcePath ?? string.Empty;
+      return sourcePath.Contains( "names_first/", StringComparison.OrdinalIgnoreCase )
+         || sourcePath.Contains( "names-first/", StringComparison.OrdinalIgnoreCase )
+         || sourcePath.Contains( "names_last/", StringComparison.OrdinalIgnoreCase )
+         || sourcePath.Contains( "names-last/", StringComparison.OrdinalIgnoreCase )
+         || sourcePath.Contains( "names_full/", StringComparison.OrdinalIgnoreCase )
+         || sourcePath.Contains( "names-full/", StringComparison.OrdinalIgnoreCase )
+         || sourcePath.Contains( "names_robots/", StringComparison.OrdinalIgnoreCase )
+         || sourcePath.Contains( "names-robots/", StringComparison.OrdinalIgnoreCase );
    }
 
    private static bool IsRetryableInvalidBatchResponse( InvalidOperationException exception )
@@ -546,6 +588,7 @@ internal static class TranslateLlmCommand
       {
          "person_given_name" => $"- Entries {indexList} are personal first names. Follow the system prompt rule for personal names: transliterate them as names instead of translating their dictionary meaning.",
          "person_family_name" => $"- Entries {indexList} are personal family names. Keep them name-like and transliterate them instead of translating them as common nouns.",
+         "person_full_name" => $"- Entries {indexList} are full personal names stored as GivenName|FamilyName. Transliterate both sides as names, preserve the literal '|' separator, and do not turn the entry into a natural-language phrase.",
          "ship_name" => $"- Entries {indexList} are standalone ship names. Translate them as concise ship names, not as sentence fragments.",
          "ship_name_modifier" => $"- Entries {indexList} are ship-name modifiers/components. Keep them concise and suitable for generated ship names.",
          "ship_name_noun" => $"- Entries {indexList} are ship-name nouns/components. Keep them concise and suitable for generated ship names.",
@@ -583,6 +626,13 @@ internal static class TranslateLlmCommand
          || sourcePath.Contains( "names-last/", StringComparison.OrdinalIgnoreCase ) )
       {
          entryTypeHint = "person_family_name";
+         return true;
+      }
+
+      if( sourcePath.Contains( "names_full/", StringComparison.OrdinalIgnoreCase )
+         || sourcePath.Contains( "names-full/", StringComparison.OrdinalIgnoreCase ) )
+      {
+         entryTypeHint = "person_full_name";
          return true;
       }
 

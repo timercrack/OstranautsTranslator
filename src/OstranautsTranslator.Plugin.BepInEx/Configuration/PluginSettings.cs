@@ -34,7 +34,7 @@ internal static class PluginSettings
          "Fonts",
          "OverrideFontTextMeshPro",
          "notosans",
-         "TMPro font asset bundle or resource name used only as fallback fonts. The game's original TMP font stays active; when it lacks glyphs, TMPro can fall back to the configured bundle/resource fonts. If the bundle contains multiple TMP_FontAsset objects, all of them are loaded and registered as fallback fonts. Supports language-specific mappings like zh=foo;default=bar." );
+         "TMPro font asset bundle or resource name used to replace the game's TMP font assets at runtime. The original text style material is preserved while the configured bundle/resource font atlas is applied. If the bundle contains multiple TMP_FontAsset objects, the first one is used as the primary replacement font and the rest are chained as its internal fallbacks. Supports language-specific mappings like zh=foo;default=bar." );
       ObservedFontCharsetOutputDirectory = config.Bind(
          "Diagnostics",
          "ObservedFontCharsetOutputDirectory",

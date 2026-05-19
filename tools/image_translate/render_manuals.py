@@ -27,7 +27,7 @@ from translate_images import (
 DEFAULT_TARGET_LANGUAGE = "Simplified Chinese"
 DEFAULT_SOURCE_LANGUAGE = "English"
 DEFAULT_BATCH_SIZE = 20
-DEFAULT_CACHE_FILE_NAME = "manuals-en-to-zh-v2.json"
+DEFAULT_CACHE_FILE_NAME = "manuals-en-to-zh.json"
 TEXT_LIKE_PATTERN = re.compile(r"[A-Za-z]")
 STRUCTURED_MARKER_PATTERN = re.compile(r"^(?:[●○•◦▪▫■□]+|\d+)$")
 PDF_BLOCK_MERGE_GAP_THRESHOLD = 8.0

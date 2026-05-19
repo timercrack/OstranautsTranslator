@@ -24,9 +24,24 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
    private const KeyCode StatusWindowToggleKey = KeyCode.F6;
    private const int MaxCachedTranslationResults = 32768;
    private const int SceneWarmupScanFrames = 12;
+   private static readonly IReadOnlyDictionary<string, string> ExactRuntimeTextMap = new Dictionary<string, string>( StringComparer.Ordinal )
+   {
+      [ "Shift" ] = "轮次",
+      [ "Shift:" ] = "轮次：",
+      [ "班次" ] = "轮次",
+      [ "班次：" ] = "轮次：",
+      [ "轮班" ] = "轮次",
+      [ "轮班：" ] = "轮次：",
+   };
+   private static readonly Regex LeadingYouMixedClauseRegex = new Regex( @"(^|\n)You\s*(?:have|has|are|feel|feels|gain|gains|need|needs|suffer(?:s)?(?:\s+from)?)\s*(?=[\u3400-\u9FFF\uF900-\uFAFF])", RegexOptions.Compiled | RegexOptions.IgnoreCase );
+   private static readonly Regex LeadingYouBeforeCjkRegex = new Regex( @"(^|\n)You\s*(?=[\u3400-\u9FFF\uF900-\uFAFF])", RegexOptions.Compiled | RegexOptions.IgnoreCase );
+   private static readonly Regex RichTextLeadingYouMixedClauseRegex = new Regex( @"(^|\n)(?<prefix>(?:<[^>]+>|\s)*)You\s*(?:have|has|are|feel|feels|gain|gains|need|needs|suffer(?:s)?(?:\s+from)?)\s*(?=[\u3400-\u9FFF\uF900-\uFAFF])", RegexOptions.Compiled | RegexOptions.IgnoreCase );
+   private static readonly Regex RichTextLeadingYouBeforeCjkRegex = new Regex( @"(^|\n)(?<prefix>(?:<[^>]+>|\s)*)You\s*(?=[\u3400-\u9FFF\uF900-\uFAFF])", RegexOptions.Compiled | RegexOptions.IgnoreCase );
    private static readonly Regex RuntimeFixedEntryRegex = new Regex( "\\{\\s*\\\"raw_text\\\"\\s*:\\s*\\\"(?<raw>(?:\\\\.|[^\\\"\\\\])*)\\\".*?\\\"seed_translations\\\"\\s*:\\s*\\{(?<translations>.*?)\\}\\s*\\}", RegexOptions.Compiled | RegexOptions.Singleline );
    private static readonly Regex LeadingYouRegex = new Regex( @"(^|\n)You(?=(?:\s|[，。？！：；、,.!?;:()\[\]{}<>\""'“”‘’]))", RegexOptions.Compiled );
    private static readonly Regex PlaceholderLoreRegex = new Regex( @"^\$template\b", RegexOptions.Compiled | RegexOptions.IgnoreCase );
+   private static readonly Regex FileNameLikeRegex = new Regex( @"^[A-Za-z0-9][A-Za-z0-9._-]*\.(json|txt|ini|cfg|dll|exe|png|jpg|jpeg|webp|gif|asset|assets|ress?|bundle)$", RegexOptions.Compiled | RegexOptions.IgnoreCase );
+   private static readonly Regex VersionLikeRegex = new Regex( @"^(?:v(?:ersion)?\s*)?\d+(?:\.\d+){1,5}(?:[-_+.][A-Za-z0-9]+)*$", RegexOptions.Compiled | RegexOptions.IgnoreCase );
    private static bool _runtimeProxyCreated;
    private static bool _sqliteRuntimeInitialized;
    private Harmony _harmony;
@@ -308,10 +323,24 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
    {
       try
       {
+         if( ExactRuntimeTextMap.TryGetValue( value, out var exactRuntimeText ) )
+         {
+            var normalizedExactRuntimeText = NormalizePartiallyLocalizedText( exactRuntimeText );
+            CacheTranslationResult( value, normalizedExactRuntimeText, CachedTranslationKind.BootstrapFixed );
+            return normalizedExactRuntimeText;
+         }
+
          if( _bootstrapFixedTranslations.TryGetValue( value, out var bootstrapTranslated ) && !string.IsNullOrWhiteSpace( bootstrapTranslated ) )
          {
-            CacheTranslationResult( value, bootstrapTranslated, CachedTranslationKind.BootstrapFixed );
-            return bootstrapTranslated;
+            var normalizedBootstrapTranslated = NormalizePartiallyLocalizedText( bootstrapTranslated );
+            CacheTranslationResult( value, normalizedBootstrapTranslated, CachedTranslationKind.BootstrapFixed );
+            return normalizedBootstrapTranslated;
+         }
+
+         if( LooksLikeTechnicalLiteral( value ) )
+         {
+            CacheTranslationResult( value, value, CachedTranslationKind.TechnicalLiteralBypass );
+            return value;
          }
 
          if( string.IsNullOrWhiteSpace( _catalog.DatabasePath ) )
@@ -333,7 +362,13 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
 
          if( _translationResultCache.TryGetValue( value, out var cachedResult ) )
          {
-            return cachedResult.Value;
+            var normalizedCachedResult = NormalizePartiallyLocalizedText( cachedResult.Value );
+            if( !string.Equals( normalizedCachedResult, cachedResult.Value, StringComparison.Ordinal ) )
+            {
+               CacheTranslationResult( value, normalizedCachedResult, cachedResult.Kind );
+            }
+
+            return normalizedCachedResult;
          }
 
           var projection = RuntimeTextProjector.CreateProjection( value, _catalog.Configuration );
@@ -357,15 +392,16 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
 
          if( lookupResult == RuntimeTranslationLookupResult.Translated )
          {
-            _translationStatistics.RecordDatabaseHit( value, translated );
-            CacheTranslationResult( value, translated, CachedTranslationKind.Translated );
+            var normalizedTranslated = NormalizePartiallyLocalizedText( translated );
+            _translationStatistics.RecordDatabaseHit( value, normalizedTranslated );
+            CacheTranslationResult( value, normalizedTranslated, CachedTranslationKind.Translated );
 
             if( PluginSettings.LogSuccessfulTranslations.Value )
             {
-               Logger.LogDebug( $"[{hookName}] {value} -> {translated}" );
+               Logger.LogDebug( $"[{hookName}] {value} -> {normalizedTranslated}" );
             }
 
-            return translated;
+            return normalizedTranslated;
          }
 
          var normalizedMixedText = NormalizePartiallyLocalizedText( value );
@@ -440,7 +476,11 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
          return value;
       }
 
-      return LeadingYouRegex.Replace( value, match => match.Groups[ 1 ].Value + "你" );
+      var normalized = RichTextLeadingYouMixedClauseRegex.Replace( value, match => match.Groups[ 1 ].Value + match.Groups[ "prefix" ].Value + "你" );
+      normalized = RichTextLeadingYouBeforeCjkRegex.Replace( normalized, match => match.Groups[ 1 ].Value + match.Groups[ "prefix" ].Value + "你" );
+      normalized = LeadingYouMixedClauseRegex.Replace( normalized, match => match.Groups[ 1 ].Value + "你" );
+      normalized = LeadingYouBeforeCjkRegex.Replace( normalized, match => match.Groups[ 1 ].Value + "你" );
+      return LeadingYouRegex.Replace( normalized, match => match.Groups[ 1 ].Value + "你" );
    }
 
    private static bool ContainsCjkCharacters( string value )
@@ -488,6 +528,49 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
       return false;
    }
 
+   private static bool LooksLikeTechnicalLiteral( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return false;
+
+      var trimmed = value.Trim();
+      if( trimmed.Length == 0 ) return false;
+
+      if( FileNameLikeRegex.IsMatch( trimmed ) ) return true;
+      if( VersionLikeRegex.IsMatch( trimmed ) ) return true;
+
+      if( trimmed.IndexOf( '\\' ) >= 0 ) return true;
+
+      var slashCount = 0;
+      for( var i = 0; i < trimmed.Length; i++ )
+      {
+         if( trimmed[ i ] == '/' ) slashCount++;
+      }
+
+      if( slashCount >= 2 && trimmed.IndexOf( " / ", StringComparison.Ordinal ) < 0 )
+      {
+         return true;
+      }
+
+      if( trimmed.StartsWith( "./", StringComparison.Ordinal )
+         || trimmed.StartsWith( "../", StringComparison.Ordinal )
+         || trimmed.StartsWith( "~/", StringComparison.Ordinal ) )
+      {
+         return true;
+      }
+
+      if( trimmed.Length >= 3
+         && char.IsLetter( trimmed[ 0 ] )
+         && trimmed[ 1 ] == ':'
+         && (trimmed[ 2 ] == '\\' || trimmed[ 2 ] == '/') )
+      {
+         return true;
+      }
+
+      if( ContainsCjkCharacters( trimmed ) ) return false;
+
+      return false;
+   }
+
    private readonly struct CachedTranslationResult
    {
       public CachedTranslationResult( string value, CachedTranslationKind kind )
@@ -510,6 +593,7 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
       Translated,
       VolatileBypass,
       PlaceholderBypass,
+      TechnicalLiteralBypass,
    }
 
    private static IReadOnlyDictionary<string, string> LoadBootstrapFixedTranslations( string databasePath, string configuredLanguage )

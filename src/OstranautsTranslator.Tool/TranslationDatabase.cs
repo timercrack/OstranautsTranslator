@@ -409,6 +409,55 @@ ORDER BY s.occurrence_count DESC, s.id;";
       return results;
    }
 
+   public IReadOnlyList<TranslationEntry> GetFinalIdentityTranslationEntries()
+   {
+      var textProcessingConfiguration = GetTextProcessingConfiguration();
+
+      using var connection = OpenConnection();
+      using var command = connection.CreateCommand();
+      command.CommandText = BuildCombinedSourceQuery(
+         GetTranslationTableName(),
+         @"
+AND t.translated_text IS NOT NULL
+AND t.translated_text <> ''
+AND COALESCE(t.translation_state, 'untranslated') = 'final'
+AND t.translated_text = s.raw_text" );
+
+      using var reader = command.ExecuteReader();
+      var results = new List<TranslationEntry>();
+      while( reader.Read() )
+      {
+         var rawText = reader.GetString( 3 );
+         var projected = ProjectEntryFields( rawText, textProcessingConfiguration );
+         var sampleContext = ResolveSampleContext( GetNullableString( reader, 5 ), GetNullableString( reader, 6 ) );
+         var tokenMetadata = BracketTokenPolicyAnalyzer.Resolve( rawText, sampleContext.MetadataJson );
+
+         results.Add( new TranslationEntry(
+            reader.GetString( 0 ),
+            reader.GetInt64( 1 ),
+            reader.GetString( 2 ),
+            rawText,
+            projected.RuntimeKey,
+            projected.RenderKey,
+            projected.TextKind,
+            reader.GetInt32( 4 ),
+            sampleContext.SampleSourcePath,
+            sampleContext.SampleLocationKind,
+            sampleContext.SampleLocationPath,
+            sampleContext.SampleContextBefore,
+            sampleContext.SampleContextAfter,
+            tokenMetadata.TokenPolicy,
+            tokenMetadata.TokenExamples,
+            tokenMetadata.NeedsManualReview,
+            tokenMetadata.TokenCorrections,
+            GetNullableString( reader, 7 ),
+            GetNullableString( reader, 8 ) ?? "untranslated",
+            GetNullableString( reader, 9 ) ) );
+      }
+
+      return results;
+   }
+
    public int ApplyTranslations( IReadOnlyList<TranslationUpdate> updates, bool overwriteExisting )
    {
       if( updates.Count == 0 ) return 0;

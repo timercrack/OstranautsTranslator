@@ -191,7 +191,14 @@ Copy-SelectedFiles -SourcePath $bepInExConfigSourcePath -DestinationPath ( Join-
    "BepInEx.cfg",
    "OstranautsTranslator.cfg"
 )
-Copy-DirectoryContents -SourcePath $pluginSourcePath -DestinationPath ( Join-Path $stageRootPath "BepInEx/plugins/OstranautsTranslator" )
+Copy-SelectedFiles -SourcePath $pluginSourcePath -DestinationPath ( Join-Path $stageRootPath "BepInEx/plugins/OstranautsTranslator" ) -FileNames @(
+   "Microsoft.Data.Sqlite.dll",
+   "notosans",
+   "OstranautsTranslator.Core.dll",
+   "OstranautsTranslator.dll",
+   "SQLitePCLRaw.core.dll",
+   "SQLitePCLRaw.provider.winsqlite3.dll"
+)
 Copy-SelectedFiles -SourcePath $toolSourcePath -DestinationPath ( Join-Path $stageRootPath "OstranautsTranslator" ) -FileNames @(
    "config-example.ini",
    "generate_generic_glossary.py",

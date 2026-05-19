@@ -279,13 +279,16 @@ SKIP_PATH_PARTS = {
     "schemas",
     "tokens",
     "verbs",
+    "names_ship",
+    "names_ship_adjectives",
+    "names_ship_nouns",
+}
+
+NAME_PEOPLE_PATH_PARTS = {
     "names_first",
     "names_last",
     "names_full",
     "names_robots",
-    "names_ship",
-    "names_ship_adjectives",
-    "names_ship_nouns",
 }
 
 PLACE_HINTS = (
@@ -420,12 +423,15 @@ class GlossaryBuilder:
     def __init__(self) -> None:
         self.terms = {category: Counter() for category in CATEGORIES}
         self.all_texts: list[str] = []
+        self.forced_people: set[str] = set()
 
-    def add(self, category: str, term: str, weight: int = 1) -> None:
+    def add(self, category: str, term: str, weight: int = 1, force: bool = False) -> None:
         if category not in self.terms:
             raise KeyError(category)
         normalized = normalize_term(term)
-        if is_low_value_term(normalized):
+        if not normalized:
+            return
+        if not force and is_low_value_term(normalized):
             return
         self.terms[category][normalized] += weight
 
@@ -451,7 +457,11 @@ class GlossaryBuilder:
             self.add("entities", term, weight=5)
 
     def process_file(self, path: Path, data_root: Path) -> None:
-        relative_parts = {part.lower() for part in path.relative_to(data_root).parts}
+        relative_path = path.relative_to(data_root)
+        relative_parts = {part.lower() for part in relative_path.parts}
+        if relative_path.parts and relative_path.parts[0].lower() in NAME_PEOPLE_PATH_PARTS:
+            self.process_name_file(path)
+            return
         if relative_parts & SKIP_PATH_PARTS:
             return
 
@@ -480,6 +490,36 @@ class GlossaryBuilder:
             self.process_conditions_simple(payload)
 
         self.walk_json(path, payload, ())
+
+    def process_name_file(self, path: Path) -> None:
+        try:
+            with path.open("r", encoding="utf-8-sig") as handle:
+                payload = json.load(handle)
+        except json.JSONDecodeError:
+            return
+
+        if not isinstance(payload, list):
+            return
+
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+
+            values = entry.get("aValues")
+            if not isinstance(values, list):
+                continue
+
+            for index in range(0, len(values), 2):
+                term = values[index]
+                if not isinstance(term, str):
+                    continue
+
+                normalized = normalize_term(term)
+                if not normalized or normalized in PEOPLE_EXACT_BLACKLIST:
+                    continue
+
+                self.forced_people.add(normalized)
+                self.add("people", normalized, weight=2, force=True)
 
     def process_tsv(self, path: Path) -> None:
         try:
@@ -764,6 +804,8 @@ class GlossaryBuilder:
     def keep_person(self, term: str) -> bool:
         if term in PEOPLE_EXACT_BLACKLIST:
             return False
+        if term in self.forced_people:
+            return True
         if term in EXTRA_PEOPLE:
             return True
         return bool(re.fullmatch(r"[A-Z][a-z]+(?:\s+[A-Z][A-Za-z'’.-]+){1,2}", term) or re.fullmatch(r"[A-Z][A-Za-z'’.-]+\s+\d+", term))

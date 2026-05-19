@@ -14,6 +14,7 @@ namespace OstranautsTranslator.Plugin.BepInEx.Fonts;
 internal static class TmpFontManager
 {
    private static readonly List<UnityEngine.Object> OverrideFonts = new List<UnityEngine.Object>();
+   private static readonly Dictionary<string, Material> OverrideMaterialCopies = new Dictionary<string, Material>( StringComparer.Ordinal );
 
    private static ManualLogSource _logger;
    private static string _overrideFontName;
@@ -33,6 +34,7 @@ internal static class TmpFontManager
       _suspendOverrideForCharsetExport = PluginSettings.ShouldSuspendOverrideTmpFontForCharsetExport();
       _suspendOverrideLogged = false;
       OverrideFonts.Clear();
+      OverrideMaterialCopies.Clear();
 
       TmpFontCharsetExporter.Initialize( logger, PluginSettings.ObservedFontCharsetOutputDirectory.Value, PluginSettings.ObservedFontCharsetMergeIntoAll.Value );
 
@@ -76,14 +78,14 @@ internal static class TmpFontManager
 
          if( existingFont != null )
          {
-            TmpFontCharsetExporter.ObserveFont( existingFont, "TMP_Settings.defaultFontAsset(with-fallbacks)" );
+            TmpFontCharsetExporter.ObserveFont( existingFont, "TMP_Settings.defaultFontAsset(before-override)" );
          }
 
-         EnsureFallbackFontsConfigured( existingFont );
+         GetOverrideFonts();
       }
       catch( Exception e )
       {
-         _logger.LogWarning( $"Failed to configure TMPro default font fallbacks. {e.Message}" );
+         _logger.LogWarning( $"Failed to initialize TMPro override font state. {e.Message}" );
       }
    }
 
@@ -115,7 +117,7 @@ internal static class TmpFontManager
          }
          else if( configuredCount > 0 )
          {
-            _logger.LogInfo( $"Configured TMP fallback fonts from '{_overrideFontName}' for {configuredCount} loaded text components." );
+            _logger.LogInfo( $"Replaced TMP fonts with '{_overrideFontName}' on {configuredCount} loaded text components." );
          }
 
          return configuredCount;
@@ -147,12 +149,40 @@ internal static class TmpFontManager
             return false;
          }
 
-         TmpFontCharsetExporter.ObserveFont( previousFont, type.FullName + ".font(with-fallbacks)" );
-         return EnsureFallbackFontsConfigured( previousFont ) > 0;
+         TmpFontCharsetExporter.ObserveFont( previousFont, type.FullName + ".font(before-override)" );
+
+         var replacementFont = GetPrimaryOverrideFont();
+         if( replacementFont == null ) return false;
+
+         if( previousFont is UnityEngine.Object previousFontObject
+            && replacementFont is UnityEngine.Object replacementFontObject
+            && previousFontObject.GetInstanceID() == replacementFontObject.GetInstanceID() )
+         {
+            return false;
+         }
+
+         var fontMaterialProperty = type.GetProperty( "fontSharedMaterial", BindingFlags.Public | BindingFlags.Instance );
+         var previousMaterial = fontMaterialProperty?.GetValue( textComponent, null ) as Material;
+
+         if( !IsSameUnityObject( previousFont, replacementFont ) )
+         {
+            fontProperty.SetValue( textComponent, replacementFont, null );
+         }
+
+         if( fontMaterialProperty?.CanWrite == true )
+         {
+            var replacementMaterial = GetOrCreateOverrideMaterialCopy( previousMaterial, fontMaterialProperty.GetValue( textComponent, null ) as Material );
+            if( replacementMaterial != null )
+            {
+               ApplyReplacementMaterial( type, textComponent, replacementMaterial );
+            }
+         }
+
+         return !IsSameUnityObject( previousFont, replacementFont );
       }
       catch( Exception e )
       {
-         _logger.LogWarning( $"Failed to configure TMP fallback fonts. {e.Message}" );
+         _logger.LogWarning( $"Failed to replace TMP font. {e.Message}" );
          return false;
       }
    }
@@ -174,7 +204,13 @@ internal static class TmpFontManager
 
          foreach( var font in OverrideFonts )
          {
-            TmpFontCharsetExporter.RegisterIgnoredFont( font, "configured fallback font" );
+            TmpFontCharsetExporter.RegisterIgnoredFont( font, "configured override font" );
+         }
+
+         if( !_globalFallbacksConfigured )
+         {
+            ConfigureBundleInternalFallbacks( OverrideFonts );
+            _globalFallbacksConfigured = true;
          }
 
          if( OverrideFonts.Count > 0 && !_overrideFontLogged )
@@ -182,16 +218,22 @@ internal static class TmpFontManager
             _overrideFontLogged = true;
             if( OverrideFonts.Count > 1 )
             {
-               _logger.LogInfo( $"Loaded TMP fallback font bundle '{_overrideFontName}' with {OverrideFonts.Count} TMP font assets. Primary fallback candidate: {GetObjectDisplayName( OverrideFonts[ 0 ] )}" );
+               _logger.LogInfo( $"Loaded TMP override font bundle '{_overrideFontName}' with {OverrideFonts.Count} TMP font assets. Primary replacement font: {GetObjectDisplayName( OverrideFonts[ 0 ] )}" );
             }
             else
             {
-               _logger.LogInfo( $"Loaded TMP fallback font: {_overrideFontName}" );
+               _logger.LogInfo( $"Loaded TMP override font: {_overrideFontName}" );
             }
          }
       }
 
       return OverrideFonts;
+   }
+
+   private static UnityEngine.Object GetPrimaryOverrideFont()
+   {
+      var fonts = GetOverrideFonts();
+      return fonts.Count == 0 ? null : fonts[ 0 ];
    }
 
    private static void LogOverrideSuspendedIfNeeded()
@@ -200,6 +242,128 @@ internal static class TmpFontManager
 
       _suspendOverrideLogged = true;
       _logger.LogInfo( "ObservedFontCharsetOutputDirectory is configured. Suspended TMPro override font replacement so the exporter can capture the original game font charsets." );
+   }
+
+   private static Material GetOrCreateOverrideMaterialCopy( Material styleSourceMaterial, Material atlasSourceMaterial )
+   {
+      if( styleSourceMaterial == null || atlasSourceMaterial == null ) return null;
+
+      var cacheKey = styleSourceMaterial.GetInstanceID().ToString() + ":" + atlasSourceMaterial.GetInstanceID();
+      if( OverrideMaterialCopies.TryGetValue( cacheKey, out var cachedMaterial ) && cachedMaterial != null ) return cachedMaterial;
+
+      var copyMaterial = UnityEngine.Object.Instantiate( atlasSourceMaterial );
+      InvokeMaterialMethodIfPresent( copyMaterial, "CopyPropertiesFromMaterial", styleSourceMaterial );
+      CopyTexturePropertyIfPresent( copyMaterial, atlasSourceMaterial, "_MainTex" );
+      CopyTexturePropertyIfPresent( copyMaterial, atlasSourceMaterial, "_FaceTex" );
+      CopyTexturePropertyIfPresent( copyMaterial, atlasSourceMaterial, "_OutlineTex" );
+      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_GradientScale" );
+      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_TextureWidth" );
+      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_TextureHeight" );
+      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_OutlineWidth" );
+      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_OutlineSoftness" );
+      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_UnderlaySoftness" );
+      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_UnderlayOffsetX" );
+      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_UnderlayOffsetY" );
+      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_UnderlayDilate" );
+      CopyColorPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_UnderlayColor" );
+      GameObject.DontDestroyOnLoad( copyMaterial );
+      OverrideMaterialCopies[ cacheKey ] = copyMaterial;
+      return copyMaterial;
+   }
+
+   private static void ApplyReplacementMaterial( Type textComponentType, object textComponent, Material replacementMaterial )
+   {
+      if( textComponentType == null || textComponent == null || replacementMaterial == null ) return;
+
+      SetMaterialPropertyIfWritable( textComponentType, textComponent, "fontSharedMaterial", replacementMaterial );
+      SetMaterialPropertyIfWritable( textComponentType, textComponent, "fontMaterial", replacementMaterial );
+      SetMaterialPropertyIfWritable( textComponentType, textComponent, "material", replacementMaterial );
+      ReplaceFirstMaterialInArrayProperty( textComponentType, textComponent, "fontSharedMaterials", replacementMaterial );
+      ReplaceFirstMaterialInArrayProperty( textComponentType, textComponent, "fontMaterials", replacementMaterial );
+
+      InvokeIfPresent( textComponentType, textComponent, "SetSharedMaterial", replacementMaterial );
+      InvokeIfPresent( textComponentType, textComponent, "UpdateMeshPadding" );
+      InvokeIfPresent( textComponentType, textComponent, "SetMaterialDirty" );
+      InvokeIfPresent( textComponentType, textComponent, "SetVerticesDirty" );
+   }
+
+   private static void SetMaterialPropertyIfWritable( Type targetType, object target, string propertyName, Material value )
+   {
+      var property = targetType.GetProperty( propertyName, BindingFlags.Public | BindingFlags.Instance );
+      if( property?.CanWrite != true ) return;
+
+      property.SetValue( target, value, null );
+   }
+
+   private static void ReplaceFirstMaterialInArrayProperty( Type targetType, object target, string propertyName, Material value )
+   {
+      var property = targetType.GetProperty( propertyName, BindingFlags.Public | BindingFlags.Instance );
+      if( property?.CanRead != true || property.CanWrite != true ) return;
+
+      if( property.GetValue( target, null ) is not Material[] materials || materials.Length == 0 ) return;
+
+      var updatedMaterials = (Material[])materials.Clone();
+      updatedMaterials[ 0 ] = value;
+      property.SetValue( target, updatedMaterials, null );
+   }
+
+   private static void InvokeIfPresent( Type targetType, object target, string methodName, params object[] args )
+   {
+      var argumentTypes = args.Select( arg => arg?.GetType() ?? typeof( object ) ).ToArray();
+      var method = targetType.GetMethod( methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, argumentTypes, null );
+      if( method == null && args.Length == 0 )
+      {
+         method = targetType.GetMethod( methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, Type.EmptyTypes, null );
+      }
+
+      method?.Invoke( target, args );
+   }
+
+   private static bool IsSameUnityObject( object left, object right )
+   {
+      if( ReferenceEquals( left, right ) ) return true;
+      if( left is not UnityEngine.Object leftObject || right is not UnityEngine.Object rightObject ) return false;
+
+      return leftObject.GetInstanceID() == rightObject.GetInstanceID();
+   }
+
+   private static void CopyTexturePropertyIfPresent( Material targetMaterial, Material sourceMaterial, string propertyName )
+   {
+      if( targetMaterial == null || sourceMaterial == null ) return;
+      if( !targetMaterial.HasProperty( propertyName ) || !sourceMaterial.HasProperty( propertyName ) ) return;
+
+      targetMaterial.SetTexture( propertyName, sourceMaterial.GetTexture( propertyName ) );
+   }
+
+   private static void CopyFloatPropertyIfPresent( Material targetMaterial, Material sourceMaterial, string propertyName )
+   {
+      if( targetMaterial == null || sourceMaterial == null ) return;
+      if( !targetMaterial.HasProperty( propertyName ) || !sourceMaterial.HasProperty( propertyName ) ) return;
+
+      targetMaterial.SetFloat( propertyName, sourceMaterial.GetFloat( propertyName ) );
+   }
+
+   private static void CopyColorPropertyIfPresent( Material targetMaterial, Material sourceMaterial, string propertyName )
+   {
+      if( targetMaterial == null || sourceMaterial == null ) return;
+      if( !targetMaterial.HasProperty( propertyName ) || !sourceMaterial.HasProperty( propertyName ) ) return;
+
+      var colorValue = InvokeMaterialMethodIfPresent( sourceMaterial, "GetColor", propertyName );
+      if( colorValue != null )
+      {
+         InvokeMaterialMethodIfPresent( targetMaterial, "SetColor", propertyName, colorValue );
+      }
+   }
+
+   private static object InvokeMaterialMethodIfPresent( Material material, string methodName, params object[] args )
+   {
+      if( material == null || string.IsNullOrWhiteSpace( methodName ) ) return null;
+
+      var argumentTypes = args.Select( arg => arg?.GetType() ?? typeof( object ) ).ToArray();
+      var method = material.GetType().GetMethod( methodName, BindingFlags.Public | BindingFlags.Instance, null, argumentTypes, null );
+      if( method == null ) return null;
+
+      return method.Invoke( material, args );
    }
 
    private static int EnsureFallbackFontsConfigured( object currentFont )
@@ -211,12 +375,11 @@ internal static class TmpFontManager
 
       if( !_globalFallbacksConfigured )
       {
-         totalAdded += MergeTmpSettingsFallbackFonts( fallbackFonts );
          totalAdded += ConfigureBundleInternalFallbacks( fallbackFonts );
          _globalFallbacksConfigured = true;
 
          var fallbackNames = string.Join( ", ", fallbackFonts.Select( GetObjectDisplayName ) );
-         _logger.LogInfo( $"Registered TMP fallback font assets from '{_overrideFontName}': [{fallbackNames}]" );
+         _logger.LogInfo( $"Registered per-font TMP fallback font assets from '{_overrideFontName}': [{fallbackNames}]" );
       }
 
       if( currentFont != null )
@@ -345,6 +508,9 @@ internal static class TmpFontManager
 
       var resolvedPath = FindAssetBundlePath( trimmedAssetName );
       var fonts = new List<UnityEngine.Object>();
+      var bundleAssetSummary = string.Empty;
+      var bundleWasFound = !string.IsNullOrWhiteSpace( resolvedPath );
+      var bundleWasLoaded = false;
 
       if( resolvedPath != null )
       {
@@ -354,6 +520,7 @@ internal static class TmpFontManager
             bundle = AssetBundle.LoadFromFile( resolvedPath );
             if( bundle != null )
             {
+               bundleWasLoaded = true;
                var typedFonts = bundle.LoadAllAssets( tmpFontAssetType );
                if( typedFonts != null )
                {
@@ -362,7 +529,9 @@ internal static class TmpFontManager
 
                if( fonts.Count == 0 )
                {
-                  fonts.AddRange( bundle.LoadAllAssets().Where( asset => asset != null && tmpFontAssetType.IsAssignableFrom( asset.GetType() ) ) );
+                  var allAssets = bundle.LoadAllAssets().Where( asset => asset != null ).ToArray();
+                  fonts.AddRange( allAssets.Where( asset => tmpFontAssetType.IsAssignableFrom( asset.GetType() ) ) );
+                  bundleAssetSummary = string.Join( ", ", allAssets.Take( 8 ).Select( asset => asset.GetType().Name + ":" + GetObjectDisplayName( asset ) ) );
                }
             }
          }
@@ -408,6 +577,22 @@ internal static class TmpFontManager
          }
 
          return uniqueFonts;
+      }
+
+      if( bundleWasFound )
+      {
+         if( bundleWasLoaded )
+         {
+            _logger.LogWarning(
+               $"TMP font bundle '{resolvedPath}' was found but no runtime-loadable TMP_FontAsset could be deserialized from it."
+               + ( string.IsNullOrWhiteSpace( bundleAssetSummary ) ? string.Empty : $" Loaded assets: {bundleAssetSummary}" ) );
+         }
+         else
+         {
+            _logger.LogWarning( $"TMP font bundle path was resolved but the bundle could not be loaded: '{resolvedPath}'." );
+         }
+
+         return Array.Empty<UnityEngine.Object>();
       }
 
       _logger.LogWarning( $"Could not locate TMP font asset '{trimmedAssetName}'." );

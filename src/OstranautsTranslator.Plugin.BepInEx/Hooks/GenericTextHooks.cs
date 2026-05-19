@@ -8,6 +8,198 @@ using UnityEngine;
 
 namespace OstranautsTranslator.Plugin.BepInEx.Hooks;
 
+internal static class RuntimeTextComponentBypassHelper
+{
+   private static readonly BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+   private const string LoadMenuTypeName = "Ostranauts.UI.Loading.GUILoadMenu";
+   private static readonly HashSet<string> SocialCombatConfirmTokens = new HashSet<string>( StringComparer.OrdinalIgnoreCase )
+   {
+      "Confirm",
+      "确认",
+      "确定",
+      "Accept",
+      "接受"
+   };
+
+   private static readonly HashSet<string> SocialCombatExitTokens = new HashSet<string>( StringComparer.OrdinalIgnoreCase )
+   {
+      "Exit",
+      "退出",
+      "Cancel",
+      "取消",
+      "Close",
+      "关闭",
+      "确认",
+      "确定"
+   };
+
+   public static bool ShouldBypassTranslation( object component )
+   {
+      var path = GetComponentPath( component );
+      return IsOptionsFilePanelPath( path )
+         || IsLoadMenuPathText( component );
+   }
+
+   public static bool TryTranslateFixedText( object component, string value, out string translatedValue )
+   {
+      translatedValue = value;
+      if( component == null ) return false;
+
+      var path = GetComponentPath( component );
+      if( string.IsNullOrWhiteSpace( path ) ) return false;
+
+      if( path.EndsWith( "/pnlActions/ActionsLabel", StringComparison.OrdinalIgnoreCase )
+      )
+      {
+         translatedValue = "操作";
+         return true;
+      }
+
+      if( path.EndsWith( "/pnlActions/ActionsLabelMandarin", StringComparison.OrdinalIgnoreCase ) )
+      {
+         translatedValue = "行动";
+         return true;
+      }
+
+      if( path.EndsWith( "/pnlPreview/txtEnglish", StringComparison.OrdinalIgnoreCase ) )
+      {
+         translatedValue = "预览";
+         return true;
+      }
+
+      if( path.EndsWith( "/pnlPreview/txtMandarin", StringComparison.OrdinalIgnoreCase ) )
+      {
+         translatedValue = "检视";
+         return true;
+      }
+
+      if( path.EndsWith( "/pnlConfirm/btn/txtEnglish", StringComparison.OrdinalIgnoreCase ) )
+      {
+         translatedValue = "确认";
+         return true;
+      }
+
+      if( path.EndsWith( "/pnlConfirm/btn/txtMandarin", StringComparison.OrdinalIgnoreCase ) )
+      {
+         translatedValue = string.Empty;
+         return true;
+      }
+
+      if( path.EndsWith( "/pnlExit/btn/txtEnglish", StringComparison.OrdinalIgnoreCase ) )
+      {
+         translatedValue = "退出";
+         return true;
+      }
+
+      if( path.EndsWith( "/pnlExit/btn/txtMandarin", StringComparison.OrdinalIgnoreCase ) )
+      {
+         translatedValue = string.Empty;
+         return true;
+      }
+
+      if( string.IsNullOrWhiteSpace( value ) ) return false;
+
+      var trimmed = value.Trim();
+      if( path.Contains( "/pnlConfirm/", StringComparison.OrdinalIgnoreCase )
+         && ( SocialCombatConfirmTokens.Contains( trimmed ) || SocialCombatExitTokens.Contains( trimmed ) ) )
+      {
+         translatedValue = "确认";
+         return true;
+      }
+
+      if( path.Contains( "/pnlExit/", StringComparison.OrdinalIgnoreCase )
+         && ( SocialCombatExitTokens.Contains( trimmed ) || SocialCombatConfirmTokens.Contains( trimmed ) ) )
+      {
+         translatedValue = "退出";
+         return true;
+      }
+
+      return false;
+   }
+
+   private static bool IsOptionsFilePanelPath( string path )
+   {
+      return !string.IsNullOrWhiteSpace( path )
+         && path.Contains( "/pnlFiles/", StringComparison.Ordinal )
+         && path.EndsWith( "/boxFilePath/txt", StringComparison.Ordinal );
+   }
+
+   private static bool IsLoadMenuPathText( object component )
+   {
+      if( component == null ) return false;
+
+      var current = RuntimeTextHookHelper.GetGameObject( component );
+      while( current != null )
+      {
+         foreach( var owner in EnumerateComponents( current ) )
+         {
+            if( owner == null ) continue;
+
+            var ownerType = owner.GetType();
+            if( !string.Equals( ownerType.FullName, LoadMenuTypeName, StringComparison.Ordinal )
+               && !string.Equals( ownerType.Name, "GUILoadMenu", StringComparison.Ordinal ) )
+            {
+               continue;
+            }
+
+            var textField = ownerType.GetField( "txtPath", InstanceFlags );
+            if( ReferenceEquals( textField?.GetValue( owner ), component ) )
+            {
+               return true;
+            }
+
+            var textProperty = ownerType.GetProperty( "txtPath", InstanceFlags );
+            if( ReferenceEquals( textProperty?.GetValue( owner, null ), component ) )
+            {
+               return true;
+            }
+         }
+
+         current = RuntimeTextHookHelper.GetGameObject( RuntimeTextHookHelper.GetParentTransform( current ) );
+      }
+
+      return false;
+   }
+
+   private static IEnumerable EnumerateComponents( GameObject gameObject )
+   {
+      if( gameObject == null ) yield break;
+
+      var getComponentsMethod = typeof( GameObject ).GetMethod( "GetComponents", new[] { typeof( Type ) } );
+      if( getComponentsMethod?.Invoke( gameObject, new object[] { typeof( Component ) } ) is not IEnumerable components ) yield break;
+
+      foreach( var component in components )
+      {
+         if( component != null ) yield return component;
+      }
+   }
+
+   internal static string GetComponentPath( object component )
+   {
+      var gameObject = RuntimeTextHookHelper.GetGameObject( component );
+      if( gameObject == null ) return string.Empty;
+
+      var segments = new Stack<string>();
+      var current = gameObject;
+      while( current != null )
+      {
+         var nameProperty = current.GetType().GetProperty( "name", InstanceFlags );
+         segments.Push( nameProperty?.GetValue( current, null ) as string ?? string.Empty );
+
+         var parentTransform = RuntimeTextHookHelper.GetParentTransform( current );
+         if( parentTransform == null )
+         {
+            break;
+         }
+
+         var gameObjectProperty = parentTransform.GetType().GetProperty( "gameObject", InstanceFlags );
+         current = gameObjectProperty?.GetValue( parentTransform, null ) as GameObject;
+      }
+
+      return segments.Count == 0 ? string.Empty : string.Join( "/", segments.ToArray() );
+   }
+}
+
 [HarmonyPatch]
 internal static class UI_Text_OnEnable_Hook
 {
@@ -23,11 +215,13 @@ internal static class UI_Text_OnEnable_Hook
 
    private static void Prefix( object __instance )
    {
+      if( RuntimeTextComponentBypassHelper.ShouldBypassTranslation( __instance ) ) return;
       RuntimeTextHookHelper.TranslateCurrentText( __instance, "UI.Text.OnEnable.before" );
    }
 
    private static void Postfix( object __instance )
    {
+      if( RuntimeTextComponentBypassHelper.ShouldBypassTranslation( __instance ) ) return;
       RuntimeTextHookHelper.TranslateCurrentText( __instance, "UI.Text.OnEnable.after" );
    }
 }
@@ -45,8 +239,16 @@ internal static class UI_Text_text_Hook
       return UiTypeResolver.Get( "UnityEngine.UI.Text" )?.GetProperty( "text", BindingFlags.Instance | BindingFlags.Public )?.GetSetMethod();
    }
 
-   private static void Prefix( ref string value )
+   private static void Prefix( object __instance, ref string value )
    {
+      if( RuntimeTextComponentBypassHelper.ShouldBypassTranslation( __instance ) ) return;
+
+      if( RuntimeTextComponentBypassHelper.TryTranslateFixedText( __instance, value, out var fixedText ) )
+      {
+         value = fixedText;
+         return;
+      }
+
       value = OstranautsTranslatorPlugin.Translate( value, "UI.Text.text" );
       value = TooltipRuntimeTranslationHelper.TranslateEmbeddedPersonNames( value, "UI.Text.text" );
    }
@@ -65,8 +267,16 @@ internal static class TMP_Text_text_Hook
       return TmpTypeResolver.Get( "TMPro.TMP_Text" )?.GetProperty( "text", BindingFlags.Instance | BindingFlags.Public )?.GetSetMethod();
    }
 
-   private static void Prefix( ref string value )
+   private static void Prefix( object __instance, ref string value )
    {
+      if( RuntimeTextComponentBypassHelper.ShouldBypassTranslation( __instance ) ) return;
+
+      if( RuntimeTextComponentBypassHelper.TryTranslateFixedText( __instance, value, out var fixedText ) )
+      {
+         value = fixedText;
+         return;
+      }
+
       value = OstranautsTranslatorPlugin.Translate( value, "TMP_Text.text" );
       value = TooltipRuntimeTranslationHelper.TranslateEmbeddedPersonNames( value, "TMP_Text.text" );
    }
@@ -85,13 +295,15 @@ internal static class TMP_Text_SetText_StringBuilder_Hook
       return AccessTools.Method( TmpTypeResolver.Get( "TMPro.TMP_Text" ), "SetText", new[] { typeof( StringBuilder ) } );
    }
 
-   private static void Prefix( ref StringBuilder __0 )
+   private static void Prefix( object __instance, ref StringBuilder __0 )
    {
+      if( RuntimeTextComponentBypassHelper.ShouldBypassTranslation( __instance ) ) return;
       RuntimeTextHookHelper.TranslateStringBuilder( ref __0, "TMP_Text.SetText(StringBuilder)" );
    }
 
    private static void Postfix( object __instance )
    {
+      if( RuntimeTextComponentBypassHelper.ShouldBypassTranslation( __instance ) ) return;
       RuntimeTextHookHelper.TranslateCurrentText( __instance, "TMP_Text.SetText(StringBuilder).post" );
    }
 }
@@ -109,13 +321,22 @@ internal static class TMP_Text_SetText_StringFloatFloatFloat_Hook
       return AccessTools.Method( TmpTypeResolver.Get( "TMPro.TMP_Text" ), "SetText", new[] { typeof( string ), typeof( float ), typeof( float ), typeof( float ) } );
    }
 
-   private static void Prefix( ref string __0 )
+   private static void Prefix( object __instance, ref string __0 )
    {
+      if( RuntimeTextComponentBypassHelper.ShouldBypassTranslation( __instance ) ) return;
+
+      if( RuntimeTextComponentBypassHelper.TryTranslateFixedText( __instance, __0, out var fixedText ) )
+      {
+         __0 = fixedText;
+         return;
+      }
+
       __0 = OstranautsTranslatorPlugin.Translate( __0, "TMP_Text.SetText(string,float,float,float)" );
    }
 
    private static void Postfix( object __instance )
    {
+      if( RuntimeTextComponentBypassHelper.ShouldBypassTranslation( __instance ) ) return;
       RuntimeTextHookHelper.TranslateCurrentText( __instance, "TMP_Text.SetText(string,float,float,float).post" );
    }
 }
@@ -140,6 +361,7 @@ internal static class TMP_Text_SetCharArray_Hook1
 
    private static void Postfix( object __instance )
    {
+      if( RuntimeTextComponentBypassHelper.ShouldBypassTranslation( __instance ) ) return;
       RuntimeTextHookHelper.TranslateCurrentText( __instance, "TMP_Text.SetCharArray(char[]).post" );
    }
 }
@@ -164,6 +386,7 @@ internal static class TMP_Text_SetCharArray_Hook2
 
    private static void Postfix( object __instance )
    {
+      if( RuntimeTextComponentBypassHelper.ShouldBypassTranslation( __instance ) ) return;
       RuntimeTextHookHelper.TranslateCurrentText( __instance, "TMP_Text.SetCharArray(char[],int,int).post" );
    }
 }
@@ -193,6 +416,7 @@ internal static class TMP_Text_SetCharArray_Hook3
 
    private static void Postfix( object __instance )
    {
+      if( RuntimeTextComponentBypassHelper.ShouldBypassTranslation( __instance ) ) return;
       RuntimeTextHookHelper.TranslateCurrentText( __instance, "TMP_Text.SetCharArray(int[],int,int).post" );
    }
 }

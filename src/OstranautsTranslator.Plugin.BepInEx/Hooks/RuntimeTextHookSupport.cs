@@ -92,6 +92,17 @@ internal static class RuntimeTextHookHelper
       var originalText = textProperty.GetValue( instance, null ) as string;
       if( !string.IsNullOrEmpty( originalText ) )
       {
+         if( RuntimeTextComponentBypassHelper.TryTranslateFixedText( instance, originalText, out var fixedText ) )
+         {
+            if( !string.Equals( fixedText, originalText, StringComparison.Ordinal ) )
+            {
+               textProperty.SetValue( instance, fixedText, null );
+            }
+
+            ApplyTmpFontIfNeeded( instance );
+            return;
+         }
+
          var translatedText = TranslateTextValue( originalText, hookName );
          if( !string.Equals( translatedText, originalText, StringComparison.Ordinal ) )
          {

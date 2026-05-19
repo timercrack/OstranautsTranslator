@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Text.Unicode;
 using OstranautsTranslator.Core;
 using OstranautsTranslator.Tool.Database;
@@ -13,6 +14,7 @@ internal sealed class NativeModExporter
 {
    private const char HotkeyTokenDelimiter = '\u241E';
    private const string WorkspaceCustomImagesDirectoryName = "mod-images";
+   private static readonly Regex BracketTokenRegex = new( @"\[(?<token>[A-Za-z0-9_-]+)\]", RegexOptions.Compiled );
 
    private static readonly JavaScriptEncoder JsonEncoder = JavaScriptEncoder.Create( UnicodeRanges.All );
 
@@ -40,6 +42,8 @@ internal sealed class NativeModExporter
 
    public NativeModExportSummary Export()
    {
+      BracketTokenPolicyAnalyzer.ConfigureForGameRoot( _options.GameRootPath );
+
       if( !File.Exists( _workspace.CorpusDatabasePath ) )
       {
          throw new FileNotFoundException( "corpus.sqlite was not found. Run scan first.", _workspace.CorpusDatabasePath );
@@ -598,6 +602,9 @@ internal sealed class NativeModExporter
          return translatedText;
       }
 
+      translatedText = NormalizeFullNamePairTranslation( sourceText, translatedText );
+      translatedText = NormalizeBracketTokenSpacing( translatedText );
+
       var sourceTokens = ExtractDelimitedTokenContents( sourceText );
       if( sourceTokens.Count == 0 )
       {
@@ -626,6 +633,68 @@ internal sealed class NativeModExporter
       return builder.ToString();
    }
 
+   private static string NormalizeBracketTokenSpacing( string translatedText )
+   {
+      if( string.IsNullOrWhiteSpace( translatedText ) || translatedText.IndexOf( '[', StringComparison.Ordinal ) < 0 )
+      {
+         return translatedText;
+      }
+
+      var matches = BracketTokenRegex.Matches( translatedText );
+      if( matches.Count == 0 )
+      {
+         return translatedText;
+      }
+
+      var builder = new StringBuilder( translatedText.Length + matches.Count );
+      var cursor = 0;
+      for( var index = 0; index < matches.Count; index++ )
+      {
+         var match = matches[ index ];
+         var matchEnd = match.Index + match.Length;
+         builder.Append( translatedText, cursor, matchEnd - cursor );
+         cursor = matchEnd;
+
+         if( cursor >= translatedText.Length || char.IsWhiteSpace( translatedText[ cursor ] ) )
+         {
+            continue;
+         }
+
+         var currentToken = match.Groups[ "token" ].Value;
+         if( translatedText[ cursor ] == '[' )
+         {
+            var nextToken = index + 1 < matches.Count && matches[ index + 1 ].Index == cursor
+               ? matches[ index + 1 ].Groups[ "token" ].Value
+               : null;
+
+            if( BracketTokenPolicyAnalyzer.NeedsGrammarBoundarySpacing( currentToken )
+               || BracketTokenPolicyAnalyzer.NeedsGrammarBoundarySpacing( nextToken ) )
+            {
+               builder.Append( ' ' );
+            }
+
+            continue;
+         }
+
+         if( BracketTokenPolicyAnalyzer.NeedsGrammarBoundarySpacing( currentToken )
+            && IsWordLikeContinuation( translatedText[ cursor ] ) )
+         {
+            builder.Append( ' ' );
+         }
+      }
+
+      builder.Append( translatedText, cursor, translatedText.Length - cursor );
+      return builder.ToString();
+   }
+
+   private static bool IsWordLikeContinuation( char value )
+   {
+      return char.IsLetterOrDigit( value )
+         || value == '_'
+         || value >= '\u3400' && value <= '\u9FFF'
+         || value >= '\uF900' && value <= '\uFAFF';
+   }
+
    private static List<string> ExtractDelimitedTokenContents( string value )
    {
       var results = new List<string>();
@@ -635,6 +704,51 @@ internal sealed class NativeModExporter
       }
 
       return results;
+   }
+
+   private static string NormalizeFullNamePairTranslation( string sourceText, string translatedText )
+   {
+      if( string.IsNullOrWhiteSpace( sourceText ) || string.IsNullOrWhiteSpace( translatedText ) )
+      {
+         return translatedText;
+      }
+
+      var sourceSeparatorIndex = sourceText.IndexOf( '|', StringComparison.Ordinal );
+      if( sourceSeparatorIndex <= 0 || sourceSeparatorIndex != sourceText.LastIndexOf( '|' ) )
+      {
+         return translatedText;
+      }
+
+      if( translatedText.IndexOf( '|', StringComparison.Ordinal ) >= 0 )
+      {
+         return translatedText;
+      }
+
+      var separatorIndex = FindTranslatedFullNameSeparatorIndex( translatedText );
+      if( separatorIndex <= 0 || separatorIndex >= translatedText.Length - 1 )
+      {
+         return translatedText;
+      }
+
+      var firstName = translatedText.Substring( 0, separatorIndex ).Trim();
+      var lastName = translatedText.Substring( separatorIndex + 1 ).Trim();
+      return string.IsNullOrWhiteSpace( firstName ) || string.IsNullOrWhiteSpace( lastName )
+         ? translatedText
+         : firstName + "|" + lastName;
+   }
+
+   private static int FindTranslatedFullNameSeparatorIndex( string translatedText )
+   {
+      var middleDotIndex = translatedText.LastIndexOf( '·' );
+      if( middleDotIndex > 0 ) return middleDotIndex;
+
+      middleDotIndex = translatedText.LastIndexOf( '•' );
+      if( middleDotIndex > 0 ) return middleDotIndex;
+
+      middleDotIndex = translatedText.LastIndexOf( '・' );
+      if( middleDotIndex > 0 ) return middleDotIndex;
+
+      return translatedText.LastIndexOf( ' ' );
    }
 
    private static List<(int Start, int End)> ExtractDelimitedTokenRanges( string value )

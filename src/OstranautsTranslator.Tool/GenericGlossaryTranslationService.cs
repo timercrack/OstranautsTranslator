@@ -68,7 +68,7 @@ internal static class GenericGlossaryTranslationService
 
          for( int i = 0; i < batch.Count; i++ )
          {
-            var translatedTerm = NormalizeTranslatedTerm( translations[ i ] );
+            var translatedTerm = NormalizeTranslatedTerm( batch[ i ].SourceTerm, batch[ i ].Category, translations[ i ] );
             if( string.IsNullOrWhiteSpace( translatedTerm ) )
             {
                throw new InvalidOperationException( $"DeepSeek returned an empty glossary translation for '{batch[ i ].SourceTerm}'." );
@@ -147,6 +147,7 @@ internal static class GenericGlossaryTranslationService
             "These inputs are glossary terms for people, places, factions, brands, ships, items, and institutions. Do not turn them into sentences or add explanations.",
             "Ostranauts is grounded, working-class hard sci-fi full of salvage crews, ship systems, labor exploitation, corporate bureaucracy, refugees, and dry black humor. Prefer grounded, industrial, near-future wording. Avoid fantasy, archaic, overly poetic, or internet-meme phrasing.",
             "For personal names, always use a stable transliteration into the target language, and preserve distinct cultural naming flavor instead of flattening names into one style.",
+            "If a source term uses a literal '|' to separate structured name parts such as GivenName|FamilyName, preserve the literal '|' in the translation and translate each side independently instead of turning it into a natural-language full name.",
             "For places, stations, factions, organizations, institutions, brands, doctrines, gangs, items, and ship names, prefer natural semantic translation whenever the meaning is interpretable. Choose wording that sounds plausible in a grubby, industrial space setting instead of leaving English untouched.",
             "If a name contains an explicit code, acronym, callsign, registration ID, model number, hotkey, or other obvious technical identifier, keep that code component unchanged while translating the meaningful part when natural.",
             "Keep recurring translated terms stable across the batch.",
@@ -164,8 +165,54 @@ internal static class GenericGlossaryTranslationService
          + JsonSerializer.Serialize( payload, BatchContextJsonOptions );
    }
 
-   private static string NormalizeTranslatedTerm( string value )
+   private static string NormalizeTranslatedTerm( string sourceTerm, string? category, string value )
    {
-      return MultiSpaceRegex.Replace( value.Trim(), " " );
+      var normalizedValue = MultiSpaceRegex.Replace( value.Trim(), " " );
+      return NormalizeStructuredNamePair( sourceTerm, category, normalizedValue );
+   }
+
+   private static string NormalizeStructuredNamePair( string sourceTerm, string? category, string translatedTerm )
+   {
+      if( !string.Equals( category, "people", StringComparison.OrdinalIgnoreCase ) )
+      {
+         return translatedTerm;
+      }
+
+      var separatorIndex = sourceTerm.IndexOf( '|', StringComparison.Ordinal );
+      if( separatorIndex <= 0 || separatorIndex != sourceTerm.LastIndexOf( '|' ) )
+      {
+         return translatedTerm;
+      }
+
+      if( translatedTerm.IndexOf( '|', StringComparison.Ordinal ) >= 0 )
+      {
+         return translatedTerm;
+      }
+
+      var translatedSeparatorIndex = FindStructuredNamePairSeparatorIndex( translatedTerm );
+      if( translatedSeparatorIndex <= 0 || translatedSeparatorIndex >= translatedTerm.Length - 1 )
+      {
+         return translatedTerm;
+      }
+
+      var firstName = translatedTerm.Substring( 0, translatedSeparatorIndex ).Trim();
+      var lastName = translatedTerm.Substring( translatedSeparatorIndex + 1 ).Trim();
+      return string.IsNullOrWhiteSpace( firstName ) || string.IsNullOrWhiteSpace( lastName )
+         ? translatedTerm
+         : firstName + "|" + lastName;
+   }
+
+   private static int FindStructuredNamePairSeparatorIndex( string translatedTerm )
+   {
+      var middleDotIndex = translatedTerm.LastIndexOf( '·' );
+      if( middleDotIndex > 0 ) return middleDotIndex;
+
+      middleDotIndex = translatedTerm.LastIndexOf( '•' );
+      if( middleDotIndex > 0 ) return middleDotIndex;
+
+      middleDotIndex = translatedTerm.LastIndexOf( '・' );
+      if( middleDotIndex > 0 ) return middleDotIndex;
+
+      return translatedTerm.LastIndexOf( ' ' );
    }
 }

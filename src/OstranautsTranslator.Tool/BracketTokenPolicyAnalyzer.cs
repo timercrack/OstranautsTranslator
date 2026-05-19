@@ -108,6 +108,26 @@ internal sealed class BracketTokenPolicyAnalyzer
       return Current.EnrichMetadataInternal( rawText, metadataJson );
    }
 
+   public static bool NeedsGrammarBoundarySpacing( string? tokenName )
+   {
+      if( string.IsNullOrWhiteSpace( tokenName ) )
+      {
+         return false;
+      }
+
+      if( TryGetKnownTokenCorrection( tokenName, out var correction )
+         && string.Equals( correction.Policy, BracketTokenPolicies.RewriteGrammar, StringComparison.Ordinal ) )
+      {
+         return true;
+      }
+
+      return string.Equals( tokenName, "us", StringComparison.OrdinalIgnoreCase )
+         || string.Equals( tokenName, "them", StringComparison.OrdinalIgnoreCase )
+         || string.Equals( tokenName, "3rd", StringComparison.OrdinalIgnoreCase )
+         || Current.IsRewriteToken( tokenName )
+         || Regex.IsMatch( tokenName, "^[A-Za-z]+$", RegexOptions.CultureInvariant ) && !Current.IsPreserveToken( tokenName );
+   }
+
    private static BracketTokenPolicyAnalyzer TryCreateForGameRoot( string gameRootPath )
    {
       try
