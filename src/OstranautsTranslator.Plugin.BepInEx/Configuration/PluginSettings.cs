@@ -11,6 +11,7 @@ internal static class PluginSettings
    public static ConfigEntry<string> Language { get; private set; }
    public static ConfigEntry<string> TranslationDatabasePath { get; private set; }
    public static ConfigEntry<bool> IncludeDraftTranslations { get; private set; }
+   public static ConfigEntry<bool> DisableChargenTimeCost { get; private set; }
    public static ConfigEntry<bool> LogSuccessfulTranslations { get; private set; }
    public static ConfigEntry<bool> LogMissingTranslations { get; private set; }
    public static ConfigEntry<bool> CaptureMissingTranslations { get; private set; }
@@ -30,6 +31,7 @@ internal static class PluginSettings
          RuntimeTranslationDeployment.GetPluginRelativeWorkspaceDatabasePathTemplate(),
          "Path to the unified SQLite translation database. Relative paths are resolved from the BepInEx root." );
       IncludeDraftTranslations = config.Bind( "General", "IncludeDraftTranslations", false, "Include draft translations when loading the runtime translation catalog." );
+      DisableChargenTimeCost = config.Bind( "General", "DisableChargenTimeCost", false, "Disable time costs during character creation career choices. When enabled, options that normally cost 1-3 years no longer increase the character's age." );
       OverrideFontTextMeshPro = config.Bind(
          "Fonts",
          "OverrideFontTextMeshPro",

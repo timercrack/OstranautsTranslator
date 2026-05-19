@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using BepInEx;
 using HarmonyLib;
+using OstranautsTranslator.Plugin.BepInEx.Configuration;
 
 namespace OstranautsTranslator.Plugin.BepInEx.Hooks;
 
@@ -6925,6 +6926,34 @@ internal static class ChargenCareerRuntimeTranslationHelper
    }
 }
 
+   internal static class ChargenTimeBypassHelper
+   {
+      private static bool IsEnabled()
+      {
+         return PluginSettings.DisableChargenTimeCost?.Value == true;
+      }
+
+      public static bool ShouldBypassChargenAgeIncrease( object condOwner )
+      {
+         if( !IsEnabled() ) return false;
+         if( condOwner == null ) return false;
+
+         var hasCondMethod = condOwner.GetType().GetMethod( "HasCond", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof( string ) }, null );
+         if( hasCondMethod == null ) return false;
+
+         return hasCondMethod.Invoke( condOwner, new object[] { "IsInChargen" } ) is bool isInChargen && isInChargen;
+      }
+
+      public static bool ShouldBypassChargenTraitYears( object guiChargenCareer )
+      {
+         if( !IsEnabled() ) return false;
+         if( guiChargenCareer == null ) return false;
+
+         var coUser = RuntimeHookTranslationHelper.GetInstanceField( guiChargenCareer.GetType(), "coUser" )?.GetValue( guiChargenCareer );
+         return ShouldBypassChargenAgeIncrease( coUser );
+      }
+   }
+
 [HarmonyPatch]
 internal static class GUIChargenCareer_RebuildMultiSelectSidebar_Hook
 {
@@ -6941,6 +6970,50 @@ internal static class GUIChargenCareer_RebuildMultiSelectSidebar_Hook
    private static void Postfix( object __instance )
    {
       ChargenCareerRuntimeTranslationHelper.TranslateMultiSelectSidebar( __instance, "GUIChargenCareer.RebuildMultiSelectSidebar" );
+   }
+}
+
+[HarmonyPatch]
+internal static class CondOwner_AddCondAmount_ChargenAgeBypass_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "CondOwner" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "CondOwner" ), "AddCondAmount", new[] { typeof( string ), typeof( double ), typeof( double ), typeof( float ) } );
+   }
+
+   private static void Prefix( object __instance, string strName, ref double fAmount )
+   {
+      if( !string.Equals( strName, "StatAge", StringComparison.Ordinal ) ) return;
+      if( fAmount <= 0.0 ) return;
+      if( !ChargenTimeBypassHelper.ShouldBypassChargenAgeIncrease( __instance ) ) return;
+
+      fAmount = 0.0;
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIChargenCareer_GetTraitYears_ChargenAgeBypass_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIChargenCareer" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "GUIChargenCareer" ), "GetTraitYears", new[] { typeof( string ) } );
+   }
+
+   private static void Postfix( object __instance, ref int __result )
+   {
+      if( !ChargenTimeBypassHelper.ShouldBypassChargenTraitYears( __instance ) ) return;
+
+      __result = 0;
    }
 }
 
