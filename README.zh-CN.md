@@ -31,6 +31,30 @@ OstranautsTranslator 是一个面向 Ostranauts 玩家使用的简体中文翻�
 - 如果游戏更新后翻译显得过时或不完整，请到 `OstranautsTranslator` 目录运行一次 `OstranautsTranslator.exe`，然后重新启动游戏。
 - 如果你想自己运行命令行翻译流程，请先把 `config-example.ini` 复制为 `config.ini`，并在 `OstranautsTranslator` 目录中填入你自己的 API key。
 
+## 效果截图
+
+下面是游戏内简体中文翻译效果示例：
+
+### 截图 1
+
+![游戏内中文界面截图 1](docs/ScreenShot_2026-05-21_130734_650.png)
+
+### 截图 2
+
+![游戏内中文界面截图 2](docs/ScreenShot_2026-05-21_130805_743.png)
+
+### 截图 3
+
+![游戏内中文界面截图 3](docs/ScreenShot_2026-05-21_130920_776.png)
+
+### 截图 4
+
+![游戏内中文界面截图 4](docs/ScreenShot_2026-05-21_130950_894.png)
+
+### 截图 5
+
+![游戏内中文界面截图 5](docs/ScreenShot_2026-05-21_131045_508.png)
+
 ## 更新方法
 
 升级到新版本时：

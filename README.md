@@ -31,6 +31,30 @@ It is meant for players first: download the release archive, extract it into the
 - If the game updates and the translation looks outdated, run `OstranautsTranslator.exe` once from the `OstranautsTranslator` folder, then launch the game again.
 - If you want to run the CLI translation workflow yourself, copy `config-example.ini` to `config.ini` in the `OstranautsTranslator` folder and fill in your own API key first.
 
+## Screenshots
+
+Examples of the in-game Simplified Chinese translation:
+
+### Screenshot 1
+
+![Translated in-game UI screenshot 1](docs/ScreenShot_2026-05-21_130734_650.png)
+
+### Screenshot 2
+
+![Translated in-game UI screenshot 2](docs/ScreenShot_2026-05-21_130805_743.png)
+
+### Screenshot 3
+
+![Translated in-game UI screenshot 3](docs/ScreenShot_2026-05-21_130920_776.png)
+
+### Screenshot 4
+
+![Translated in-game UI screenshot 4](docs/ScreenShot_2026-05-21_130950_894.png)
+
+### Screenshot 5
+
+![Translated in-game UI screenshot 5](docs/ScreenShot_2026-05-21_131045_508.png)
+
 ## Updating
 
 To update to a newer version:
