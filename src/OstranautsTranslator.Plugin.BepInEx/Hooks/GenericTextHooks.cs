@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text;
 using HarmonyLib;
 using UnityEngine;
@@ -11,33 +12,30 @@ namespace OstranautsTranslator.Plugin.BepInEx.Hooks;
 internal static class RuntimeTextComponentBypassHelper
 {
    private static readonly BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+   private static readonly ConditionalWeakTable<object, ComponentBypassState> ComponentBypassStates = new ConditionalWeakTable<object, ComponentBypassState>();
    private const string LoadMenuTypeName = "Ostranauts.UI.Loading.GUILoadMenu";
-   private static readonly HashSet<string> SocialCombatConfirmTokens = new HashSet<string>( StringComparer.OrdinalIgnoreCase )
-   {
-      "Confirm",
-      "确认",
-      "确定",
-      "Accept",
-      "接受"
-   };
-
-   private static readonly HashSet<string> SocialCombatExitTokens = new HashSet<string>( StringComparer.OrdinalIgnoreCase )
-   {
-      "Exit",
-      "退出",
-      "Cancel",
-      "取消",
-      "Close",
-      "关闭",
-      "确认",
-      "确定"
-   };
+   private const string MessageDisplayTypeName = "Ostranauts.ShipGUIs.NavStation.GUIMessageDisplay";
+   private static readonly string[] SocialCombatConfirmSourceTexts = { "Confirm", "Accept" };
+   private static readonly string[] SocialCombatExitSourceTexts = { "Exit", "Cancel", "Close" };
+   private const string SocialCombatActionsText = "行动";
+   private const string SocialCombatPreviewText = "预览";
+   private const string SocialCombatReviewText = "检视";
+   private const string SocialCombatConfirmText = "确认";
+   private const string SocialCombatExitText = "退出";
 
    public static bool ShouldBypassTranslation( object component )
    {
+      if( component == null ) return false;
+
+      var state = ComponentBypassStates.GetOrCreateValue( component );
+      if( state.HasBypassDecision ) return state.ShouldBypass;
+
       var path = GetComponentPath( component );
-      return IsOptionsFilePanelPath( path )
-         || IsLoadMenuPathText( component );
+      state.ShouldBypass = IsOptionsFilePanelPath( path )
+         || IsLoadMenuPathText( component )
+         || IsMessageDisplayText( component );
+      state.HasBypassDecision = true;
+      return state.ShouldBypass;
    }
 
    public static bool TryTranslateFixedText( object component, string value, out string translatedValue )
@@ -51,49 +49,49 @@ internal static class RuntimeTextComponentBypassHelper
       if( path.EndsWith( "/pnlActions/ActionsLabel", StringComparison.OrdinalIgnoreCase )
       )
       {
-         translatedValue = "操作";
+         translatedValue = SocialCombatActionsText;
          return true;
       }
 
       if( path.EndsWith( "/pnlActions/ActionsLabelMandarin", StringComparison.OrdinalIgnoreCase ) )
       {
-         translatedValue = "行动";
+         translatedValue = SocialCombatActionsText;
          return true;
       }
 
       if( path.EndsWith( "/pnlPreview/txtEnglish", StringComparison.OrdinalIgnoreCase ) )
       {
-         translatedValue = "预览";
+         translatedValue = SocialCombatPreviewText;
          return true;
       }
 
       if( path.EndsWith( "/pnlPreview/txtMandarin", StringComparison.OrdinalIgnoreCase ) )
       {
-         translatedValue = "检视";
+         translatedValue = SocialCombatReviewText;
          return true;
       }
 
       if( path.EndsWith( "/pnlConfirm/btn/txtEnglish", StringComparison.OrdinalIgnoreCase ) )
       {
-         translatedValue = "确认";
+         translatedValue = SocialCombatConfirmText;
          return true;
       }
 
       if( path.EndsWith( "/pnlConfirm/btn/txtMandarin", StringComparison.OrdinalIgnoreCase ) )
       {
-         translatedValue = string.Empty;
+         translatedValue = SocialCombatConfirmText;
          return true;
       }
 
       if( path.EndsWith( "/pnlExit/btn/txtEnglish", StringComparison.OrdinalIgnoreCase ) )
       {
-         translatedValue = "退出";
+         translatedValue = SocialCombatExitText;
          return true;
       }
 
       if( path.EndsWith( "/pnlExit/btn/txtMandarin", StringComparison.OrdinalIgnoreCase ) )
       {
-         translatedValue = string.Empty;
+         translatedValue = SocialCombatExitText;
          return true;
       }
 
@@ -101,20 +99,46 @@ internal static class RuntimeTextComponentBypassHelper
 
       var trimmed = value.Trim();
       if( path.Contains( "/pnlConfirm/", StringComparison.OrdinalIgnoreCase )
-         && ( SocialCombatConfirmTokens.Contains( trimmed ) || SocialCombatExitTokens.Contains( trimmed ) ) )
+         && ( MatchesAnySourceOrTranslated( trimmed, SocialCombatConfirmSourceTexts, "UI.Text.Bypass.SocialCombat.ConfirmToken" )
+            || MatchesAnySourceOrTranslated( trimmed, SocialCombatExitSourceTexts, "UI.Text.Bypass.SocialCombat.ExitToken" ) ) )
       {
-         translatedValue = "确认";
+         translatedValue = SocialCombatConfirmText;
          return true;
       }
 
       if( path.Contains( "/pnlExit/", StringComparison.OrdinalIgnoreCase )
-         && ( SocialCombatExitTokens.Contains( trimmed ) || SocialCombatConfirmTokens.Contains( trimmed ) ) )
+         && ( MatchesAnySourceOrTranslated( trimmed, SocialCombatExitSourceTexts, "UI.Text.Bypass.SocialCombat.ExitToken" )
+            || MatchesAnySourceOrTranslated( trimmed, SocialCombatConfirmSourceTexts, "UI.Text.Bypass.SocialCombat.ConfirmToken" ) ) )
       {
-         translatedValue = "退出";
+         translatedValue = SocialCombatExitText;
          return true;
       }
 
       return false;
+   }
+
+   private static bool MatchesAnySourceOrTranslated( string value, IReadOnlyList<string> sourceTexts, string hookName )
+   {
+      foreach( var sourceText in sourceTexts )
+      {
+         if( string.Equals( value, sourceText, StringComparison.OrdinalIgnoreCase ) )
+         {
+            return true;
+         }
+
+         var translatedSource = TranslateLiteral( sourceText, hookName + "." + sourceText );
+         if( string.Equals( value, translatedSource, StringComparison.Ordinal ) )
+         {
+            return true;
+         }
+      }
+
+      return false;
+   }
+
+   private static string TranslateLiteral( string value, string hookName )
+   {
+      return RuntimeTextHookHelper.TranslateTextValue( value, hookName );
    }
 
    private static bool IsOptionsFilePanelPath( string path )
@@ -161,6 +185,49 @@ internal static class RuntimeTextComponentBypassHelper
       return false;
    }
 
+   private static bool IsMessageDisplayText( object component )
+   {
+      if( component == null ) return false;
+
+      var current = RuntimeTextHookHelper.GetGameObject( component );
+      while( current != null )
+      {
+         foreach( var owner in EnumerateComponents( current ) )
+         {
+            if( owner == null ) continue;
+
+            var ownerType = owner.GetType();
+            if( !string.Equals( ownerType.FullName, MessageDisplayTypeName, StringComparison.Ordinal )
+               && !string.Equals( ownerType.Name, "GUIMessageDisplay", StringComparison.Ordinal ) )
+            {
+               continue;
+            }
+
+            if( IsOwnerTextField( ownerType, owner, "txtStatus", component )
+               || IsOwnerTextField( ownerType, owner, "txtComms", component ) )
+            {
+               return true;
+            }
+         }
+
+         current = RuntimeTextHookHelper.GetGameObject( RuntimeTextHookHelper.GetParentTransform( current ) );
+      }
+
+      return false;
+   }
+
+   private static bool IsOwnerTextField( Type ownerType, object owner, string memberName, object component )
+   {
+      var textField = ownerType.GetField( memberName, InstanceFlags );
+      if( ReferenceEquals( textField?.GetValue( owner ), component ) )
+      {
+         return true;
+      }
+
+      var textProperty = ownerType.GetProperty( memberName, InstanceFlags );
+      return ReferenceEquals( textProperty?.GetValue( owner, null ), component );
+   }
+
    private static IEnumerable EnumerateComponents( GameObject gameObject )
    {
       if( gameObject == null ) yield break;
@@ -176,8 +243,18 @@ internal static class RuntimeTextComponentBypassHelper
 
    internal static string GetComponentPath( object component )
    {
+      if( component == null ) return string.Empty;
+
+      var state = ComponentBypassStates.GetOrCreateValue( component );
+      if( state.HasComponentPath ) return state.ComponentPath;
+
       var gameObject = RuntimeTextHookHelper.GetGameObject( component );
-      if( gameObject == null ) return string.Empty;
+      if( gameObject == null )
+      {
+         state.ComponentPath = string.Empty;
+         state.HasComponentPath = true;
+         return string.Empty;
+      }
 
       var segments = new Stack<string>();
       var current = gameObject;
@@ -196,7 +273,17 @@ internal static class RuntimeTextComponentBypassHelper
          current = gameObjectProperty?.GetValue( parentTransform, null ) as GameObject;
       }
 
-      return segments.Count == 0 ? string.Empty : string.Join( "/", segments.ToArray() );
+      state.ComponentPath = segments.Count == 0 ? string.Empty : string.Join( "/", segments.ToArray() );
+      state.HasComponentPath = true;
+      return state.ComponentPath;
+   }
+
+   private sealed class ComponentBypassState
+   {
+      public bool HasBypassDecision { get; set; }
+      public bool ShouldBypass { get; set; }
+      public bool HasComponentPath { get; set; }
+      public string ComponentPath { get; set; } = string.Empty;
    }
 }
 

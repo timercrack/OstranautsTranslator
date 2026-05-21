@@ -76,6 +76,11 @@ internal static class RuntimeTextHookHelper
    {
       if( instance == null ) return;
 
+      if( RuntimeTextComponentBypassHelper.ShouldBypassTranslation( instance ) )
+      {
+         return;
+      }
+
       if( IsGuiContentInstance( instance ) )
       {
          TranslateGuiContent( instance, hookName );
@@ -116,6 +121,11 @@ internal static class RuntimeTextHookHelper
    public static void TranslateCurrentTextIfChanged( object instance, string hookName )
    {
       if( instance == null ) return;
+
+      if( RuntimeTextComponentBypassHelper.ShouldBypassTranslation( instance ) )
+      {
+         return;
+      }
 
       if( IsGuiContentInstance( instance ) )
       {

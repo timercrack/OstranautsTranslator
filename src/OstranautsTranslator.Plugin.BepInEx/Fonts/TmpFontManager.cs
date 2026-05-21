@@ -7,6 +7,7 @@ using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using OstranautsTranslator.Plugin.BepInEx.Configuration;
+using OstranautsTranslator.Plugin.BepInEx.Hooks;
 using UnityEngine;
 
 namespace OstranautsTranslator.Plugin.BepInEx.Fonts;
@@ -15,6 +16,7 @@ internal static class TmpFontManager
 {
    private static readonly List<UnityEngine.Object> OverrideFonts = new List<UnityEngine.Object>();
    private static readonly Dictionary<string, Material> OverrideMaterialCopies = new Dictionary<string, Material>( StringComparer.Ordinal );
+   private static readonly HashSet<string> UnsupportedReplacementMaterialTypes = new HashSet<string>( StringComparer.Ordinal );
 
    private static ManualLogSource _logger;
    private static string _overrideFontName;
@@ -23,6 +25,7 @@ internal static class TmpFontManager
    private static bool _globalFallbacksConfigured;
    private static bool _suspendOverrideForCharsetExport;
    private static bool _suspendOverrideLogged;
+   private static bool _deferredLoadingSweepNeeded;
 
    public static void Initialize( ManualLogSource logger, string overrideFontName )
    {
@@ -33,8 +36,10 @@ internal static class TmpFontManager
       _globalFallbacksConfigured = false;
       _suspendOverrideForCharsetExport = PluginSettings.ShouldSuspendOverrideTmpFontForCharsetExport();
       _suspendOverrideLogged = false;
+      _deferredLoadingSweepNeeded = false;
       OverrideFonts.Clear();
       OverrideMaterialCopies.Clear();
+      UnsupportedReplacementMaterialTypes.Clear();
 
       TmpFontCharsetExporter.Initialize( logger, PluginSettings.ObservedFontCharsetOutputDirectory.Value, PluginSettings.ObservedFontCharsetMergeIntoAll.Value );
 
@@ -129,6 +134,14 @@ internal static class TmpFontManager
       }
    }
 
+   public static void ApplyDeferredOverrideFontSweepIfNeeded()
+   {
+      if( !_deferredLoadingSweepNeeded || OstranautsTranslatorPlugin.IsLoadingScreenActive() ) return;
+
+      _deferredLoadingSweepNeeded = false;
+      ApplyOverrideFontToLoadedTextComponents();
+   }
+
    public static bool ApplyOverrideFont( object textComponent )
    {
       if( textComponent == null ) return false;
@@ -151,6 +164,9 @@ internal static class TmpFontManager
 
          TmpFontCharsetExporter.ObserveFont( previousFont, type.FullName + ".font(before-override)" );
 
+         var fontMaterialProperty = type.GetProperty( "fontSharedMaterial", BindingFlags.Public | BindingFlags.Instance );
+         var previousMaterial = fontMaterialProperty?.GetValue( textComponent, null ) as Material;
+
          var replacementFont = GetPrimaryOverrideFont();
          if( replacementFont == null ) return false;
 
@@ -161,21 +177,10 @@ internal static class TmpFontManager
             return false;
          }
 
-         var fontMaterialProperty = type.GetProperty( "fontSharedMaterial", BindingFlags.Public | BindingFlags.Instance );
-         var previousMaterial = fontMaterialProperty?.GetValue( textComponent, null ) as Material;
-
          if( !IsSameUnityObject( previousFont, replacementFont ) )
          {
             fontProperty.SetValue( textComponent, replacementFont, null );
-         }
-
-         if( fontMaterialProperty?.CanWrite == true )
-         {
-            var replacementMaterial = GetOrCreateOverrideMaterialCopy( previousMaterial, fontMaterialProperty.GetValue( textComponent, null ) as Material );
-            if( replacementMaterial != null )
-            {
-               ApplyReplacementMaterial( type, textComponent, replacementMaterial );
-            }
+            TryApplyReplacementMaterial( type, textComponent, previousMaterial, replacementFont );
          }
 
          return !IsSameUnityObject( previousFont, replacementFont );
@@ -184,6 +189,33 @@ internal static class TmpFontManager
       {
          _logger.LogWarning( $"Failed to replace TMP font. {e.Message}" );
          return false;
+      }
+   }
+
+   private static void TryApplyReplacementMaterial( Type textComponentType, object textComponent, Material previousMaterial, object replacementFont )
+   {
+      if( previousMaterial == null ) return;
+
+      var fontMaterialProperty = textComponentType?.GetProperty( "fontSharedMaterial", BindingFlags.Public | BindingFlags.Instance );
+      if( fontMaterialProperty?.CanRead != true || fontMaterialProperty.CanWrite != true ) return;
+
+      var componentTypeName = textComponentType.FullName ?? textComponentType.Name;
+      if( UnsupportedReplacementMaterialTypes.Contains( componentTypeName ) ) return;
+
+      try
+      {
+         var atlasMaterial = GetFontAssetMaterial( replacementFont ) ?? fontMaterialProperty.GetValue( textComponent, null ) as Material;
+         var replacementMaterial = GetOrCreateOverrideMaterialCopy( previousMaterial, atlasMaterial );
+         if( replacementMaterial != null )
+         {
+            ApplyReplacementMaterial( textComponentType, textComponent, replacementMaterial );
+         }
+      }
+      catch( Exception e )
+      {
+         UnsupportedReplacementMaterialTypes.Add( componentTypeName );
+         var rootMessage = e.InnerException?.Message ?? e.Message;
+         _logger.LogWarning( $"Disabling TMP replacement material override for '{componentTypeName}' after failure. {rootMessage}" );
       }
    }
 
@@ -257,8 +289,14 @@ internal static class TmpFontManager
       CopyTexturePropertyIfPresent( copyMaterial, atlasSourceMaterial, "_FaceTex" );
       CopyTexturePropertyIfPresent( copyMaterial, atlasSourceMaterial, "_OutlineTex" );
       CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_GradientScale" );
+      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_ScaleRatioA" );
+      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_ScaleRatioB" );
+      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_ScaleRatioC" );
       CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_TextureWidth" );
       CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_TextureHeight" );
+      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_FaceDilate" );
+      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_WeightNormal" );
+      CopyBoldWeightFromNormalIfPresent( copyMaterial, atlasSourceMaterial );
       CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_OutlineWidth" );
       CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_OutlineSoftness" );
       CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_UnderlaySoftness" );
@@ -269,6 +307,16 @@ internal static class TmpFontManager
       GameObject.DontDestroyOnLoad( copyMaterial );
       OverrideMaterialCopies[ cacheKey ] = copyMaterial;
       return copyMaterial;
+   }
+
+   private static Material GetFontAssetMaterial( object fontAsset )
+   {
+      if( fontAsset == null ) return null;
+
+      var materialProperty = fontAsset.GetType().GetProperty( "material", BindingFlags.Public | BindingFlags.Instance )
+         ?? fontAsset.GetType().GetProperty( "atlasMaterial", BindingFlags.Public | BindingFlags.Instance );
+
+      return materialProperty?.GetValue( fontAsset, null ) as Material;
    }
 
    private static void ApplyReplacementMaterial( Type textComponentType, object textComponent, Material replacementMaterial )
@@ -341,6 +389,23 @@ internal static class TmpFontManager
       if( !targetMaterial.HasProperty( propertyName ) || !sourceMaterial.HasProperty( propertyName ) ) return;
 
       targetMaterial.SetFloat( propertyName, sourceMaterial.GetFloat( propertyName ) );
+   }
+
+   private static void CopyBoldWeightFromNormalIfPresent( Material targetMaterial, Material sourceMaterial )
+   {
+      if( targetMaterial == null || sourceMaterial == null ) return;
+      if( !targetMaterial.HasProperty( "_WeightBold" ) ) return;
+
+      if( sourceMaterial.HasProperty( "_WeightNormal" ) )
+      {
+         targetMaterial.SetFloat( "_WeightBold", sourceMaterial.GetFloat( "_WeightNormal" ) );
+         return;
+      }
+
+      if( sourceMaterial.HasProperty( "_WeightBold" ) )
+      {
+         targetMaterial.SetFloat( "_WeightBold", sourceMaterial.GetFloat( "_WeightBold" ) );
+      }
    }
 
    private static void CopyColorPropertyIfPresent( Material targetMaterial, Material sourceMaterial, string propertyName )
@@ -446,6 +511,32 @@ internal static class TmpFontManager
       if( list == null ) return 0;
 
       return AddUniqueFontAssets( list, fallbackFonts );
+   }
+
+   private static int ApplyOverrideFallbacksToLoadedFontAssets( IEnumerable<UnityEngine.Object> fallbackFonts )
+   {
+      var tmpFontAssetType = Type.GetType( "TMPro.TMP_FontAsset, Unity.TextMeshPro", false );
+      if( tmpFontAssetType == null ) return 0;
+
+      try
+      {
+         var loadedFonts = Resources.FindObjectsOfTypeAll( tmpFontAssetType );
+         if( loadedFonts == null ) return 0;
+
+         var totalAdded = 0;
+         foreach( var loadedFont in loadedFonts )
+         {
+            if( loadedFont == null ) continue;
+            totalAdded += MergeFontFallbacks( loadedFont, fallbackFonts, loadedFont );
+         }
+
+         return totalAdded;
+      }
+      catch( Exception e )
+      {
+         _logger.LogWarning( $"Failed to apply TMP override fallbacks to loaded font assets. {e.Message}" );
+         return 0;
+      }
    }
 
    private static int AddUniqueFontAssets( IList targetList, IEnumerable<UnityEngine.Object> fonts, params object[] excludedFonts )

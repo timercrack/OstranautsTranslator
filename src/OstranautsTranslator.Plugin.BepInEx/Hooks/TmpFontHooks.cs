@@ -36,7 +36,11 @@ internal static class TextMeshProUGUI_OnEnable_Hook
 
    private static void Postfix( object __instance )
    {
-      RuntimeTextHookHelper.TranslateCurrentText( __instance, "TextMeshProUGUI.OnEnable" );
+      if( !RuntimeTextComponentBypassHelper.ShouldBypassTranslation( __instance ) )
+      {
+         RuntimeTextHookHelper.TranslateCurrentText( __instance, "TextMeshProUGUI.OnEnable" );
+      }
+
       TmpFontManager.ApplyOverrideFont( __instance );
    }
 }
@@ -56,7 +60,11 @@ internal static class TextMeshPro_OnEnable_Hook
 
    private static void Postfix( object __instance )
    {
-      RuntimeTextHookHelper.TranslateCurrentText( __instance, "TextMeshPro.OnEnable" );
+      if( !RuntimeTextComponentBypassHelper.ShouldBypassTranslation( __instance ) )
+      {
+         RuntimeTextHookHelper.TranslateCurrentText( __instance, "TextMeshPro.OnEnable" );
+      }
+
       TmpFontManager.ApplyOverrideFont( __instance );
    }
 }
@@ -74,14 +82,19 @@ internal static class TMP_Text_SetText_Hook
       return AccessTools.Method( TmpTypeResolver.Get( "TMPro.TMP_Text" ), "SetText", new[] { typeof( string ), typeof( bool ) } );
    }
 
-   private static void Prefix( ref string __0 )
+   private static void Prefix( object __instance, ref string __0 )
    {
+      if( RuntimeTextComponentBypassHelper.ShouldBypassTranslation( __instance ) ) return;
       __0 = OstranautsTranslatorPlugin.Translate( __0, "TMP_Text.SetText" );
    }
 
    private static void Postfix( object __instance )
    {
-      RuntimeTextHookHelper.TranslateCurrentText( __instance, "TMP_Text.SetText.post" );
+      if( !RuntimeTextComponentBypassHelper.ShouldBypassTranslation( __instance ) )
+      {
+         RuntimeTextHookHelper.TranslateCurrentText( __instance, "TMP_Text.SetText.post" );
+      }
+
       TmpFontManager.ApplyOverrideFont( __instance );
    }
 }
@@ -99,8 +112,9 @@ internal static class TMP_Text_set_text_Hook
       return TmpTypeResolver.Get( "TMPro.TMP_Text" )?.GetProperty( "text" )?.GetSetMethod( true );
    }
 
-   private static void Prefix( ref string value )
+   private static void Prefix( object __instance, ref string value )
    {
+      if( RuntimeTextComponentBypassHelper.ShouldBypassTranslation( __instance ) ) return;
       value = OstranautsTranslatorPlugin.Translate( value, "TMP_Text.text" );
    }
 }
@@ -118,8 +132,9 @@ internal static class UI_Text_set_text_Hook
       return UiTypeResolver.Get( "UnityEngine.UI.Text" )?.GetProperty( "text" )?.GetSetMethod( true );
    }
 
-   private static void Prefix( ref string value )
+   private static void Prefix( object __instance, ref string value )
    {
+      if( RuntimeTextComponentBypassHelper.ShouldBypassTranslation( __instance ) ) return;
       value = OstranautsTranslatorPlugin.Translate( value, "UI.Text.text" );
    }
 }

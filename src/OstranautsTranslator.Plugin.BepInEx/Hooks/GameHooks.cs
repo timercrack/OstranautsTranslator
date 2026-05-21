@@ -558,6 +558,8 @@ internal static class ChargenBodyRuntimeTranslationHelper
 
 internal static class PdaRuntimeTranslationHelper
 {
+   private static readonly Regex ColorTagWrapperRegex = new Regex( @"^(?<prefix><color=.*?>)(?<body>.*?)(?<suffix></color>)$", RegexOptions.Compiled | RegexOptions.CultureInvariant );
+
    private static readonly IReadOnlyDictionary<string, string> AppTitleMap = new Dictionary<string, string>( StringComparer.Ordinal )
    {
       [ "HOME" ] = "主页",
@@ -591,6 +593,22 @@ internal static class PdaRuntimeTranslationHelper
    };
 
    private static readonly Regex TilesSelectedRegex = new Regex( @"^(?<count>\d+) tiles selected$", RegexOptions.Compiled | RegexOptions.CultureInvariant );
+
+   private static readonly IReadOnlyDictionary<string, string> PersonModuleExactValueMap = new Dictionary<string, string>( StringComparer.Ordinal )
+   {
+      [ "n/a" ] = "无",
+      [ "N/A" ] = "无",
+      [ "None" ] = "无",
+      [ "Male" ] = "男性",
+      [ "Female" ] = "女性",
+      [ "Non-Binary" ] = "非二元",
+      [ "OKLG Civilian" ] = "OKLG 平民",
+      [ "OKLG Civillian" ] = "OKLG 平民",
+      [ "OKLG civilian" ] = "OKLG 平民",
+      [ "OKLG civillian" ] = "OKLG 平民",
+      [ "AyoSec" ] = "阿约安全",
+      [ "Ayotimiwa Ship Breaking Co." ] = "阿约蒂米瓦拆船公司",
+   };
 
    private static readonly IReadOnlyDictionary<string, string> TitleByImageName = new Dictionary<string, string>( StringComparer.Ordinal )
    {
@@ -879,28 +897,101 @@ internal static class PdaRuntimeTranslationHelper
       for( var i = 0; i < lines.Length; i++ )
       {
          var line = lines[ i ];
-
-         if( line.StartsWith( "Factions: ", StringComparison.Ordinal ) )
+         var translatedLine = TranslatePersonModuleLine( line, hookName + "[" + i + "]" );
+         if( !string.Equals( translatedLine, line, StringComparison.Ordinal ) )
          {
-            lines[ i ] = "派系：" + TranslateFactionList( line.Substring( "Factions: ".Length ), hookName + "[" + i + "].factions" );
-            continue;
+            changed = true;
+            lines[ i ] = translatedLine;
          }
-
-         if( string.Equals( line, "n/a", StringComparison.Ordinal ) || string.Equals( line, "N/A", StringComparison.Ordinal ) )
-         {
-            lines[ i ] = "无";
-            continue;
-         }
-
-         lines[ i ] = RuntimeTextHookHelper.TranslateTextValue( line, hookName + "[" + i + "]" );
       }
 
-      return string.Join( "\n", lines );
+      return changed ? string.Join( "\n", lines ) : value;
+   }
+
+   private static string TranslatePersonModuleLine( string line, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( line ) ) return line;
+
+      if( TryTranslateAgeGenderLine( line, hookName, out var translatedAgeGenderLine ) )
+      {
+         return translatedAgeGenderLine;
+      }
+
+      if( line.StartsWith( "Career: ", StringComparison.Ordinal ) )
+      {
+         return "职业：" + TranslatePersonModuleValuePreservingColor( line.Substring( "Career: ".Length ), hookName + ".career" );
+      }
+
+      if( line.StartsWith( "Homeworld: ", StringComparison.Ordinal ) )
+      {
+         return "母星：" + TranslatePersonModuleValuePreservingColor( line.Substring( "Homeworld: ".Length ), hookName + ".homeworld" );
+      }
+
+      if( line.StartsWith( "Strata: ", StringComparison.Ordinal ) )
+      {
+         return "阶层：" + TranslatePersonModuleDelimitedValuesPreservingColor( line.Substring( "Strata: ".Length ), hookName + ".strata", TranslatePersonModuleScalarValue );
+      }
+
+      if( line.StartsWith( "Factions: ", StringComparison.Ordinal ) )
+      {
+         return "派系：" + TranslateFactionList( line.Substring( "Factions: ".Length ), hookName + ".factions" );
+      }
+
+      if( line.StartsWith( "My Standings: ", StringComparison.Ordinal ) )
+      {
+         return "我的关系：" + TranslatePersonModuleValuePreservingColor( line.Substring( "My Standings: ".Length ), hookName + ".standings" );
+      }
+
+      if( line.StartsWith( "They See Us As: ", StringComparison.Ordinal ) )
+      {
+         return "他们眼中的我们：" + TranslatePersonModuleDelimitedValuesPreservingColor( line.Substring( "They See Us As: ".Length ), hookName + ".theySeeUsAs", TranslatePersonModuleScalarValue );
+      }
+
+      if( line.StartsWith( "We See Them As: ", StringComparison.Ordinal ) )
+      {
+         return "我们眼中的他们：" + TranslatePersonModuleDelimitedValuesPreservingColor( line.Substring( "We See Them As: ".Length ), hookName + ".weSeeThemAs", TranslatePersonModuleScalarValue );
+      }
+
+      if( PersonModuleExactValueMap.TryGetValue( line, out var exactValue ) )
+      {
+         return exactValue;
+      }
+
+      return RuntimeTextHookHelper.TranslateTextValue( line, hookName );
+   }
+
+   private static bool TryTranslateAgeGenderLine( string line, string hookName, out string translatedLine )
+   {
+      const string agePrefix = "Age: ";
+      const string genderSeparator = "  Gender: ";
+
+      translatedLine = string.Empty;
+      if( !line.StartsWith( agePrefix, StringComparison.Ordinal ) ) return false;
+
+      var genderIndex = line.IndexOf( genderSeparator, agePrefix.Length, StringComparison.Ordinal );
+      if( genderIndex < 0 ) return false;
+
+      var ageValue = line.Substring( agePrefix.Length, genderIndex - agePrefix.Length );
+      var genderValue = line.Substring( genderIndex + genderSeparator.Length );
+      translatedLine = "年龄："
+         + TranslatePersonModuleValuePreservingColor( ageValue, hookName + ".age" )
+         + "  性别："
+         + TranslatePersonModuleValuePreservingColor( genderValue, hookName + ".gender" );
+      return true;
    }
 
    private static string TranslateFactionList( string value, string hookName )
    {
       if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var colorMatch = ColorTagWrapperRegex.Match( value );
+      if( colorMatch.Success )
+      {
+         var translatedBody = TranslateFactionList( colorMatch.Groups[ "body" ].Value, hookName + ".body" );
+         return string.Equals( translatedBody, colorMatch.Groups[ "body" ].Value, StringComparison.Ordinal )
+            ? value
+            : colorMatch.Groups[ "prefix" ].Value + translatedBody + colorMatch.Groups[ "suffix" ].Value;
+      }
 
       var parts = value.Split( new[] { ", " }, StringSplitOptions.None );
       var changed = false;
@@ -933,8 +1024,71 @@ internal static class PdaRuntimeTranslationHelper
       {
          "Policia Federal" => "联邦警察",
          "Polícia Federal" => "联邦警察",
+         "AyoSec" => "阿约安全",
+         "Ayotimiwa Ship Breaking Co." => "阿约蒂米瓦拆船公司",
+         "OKLG Civilian" => "OKLG 平民",
+         "OKLG Civillian" => "OKLG 平民",
+         "OKLG civilian" => "OKLG 平民",
+         "OKLG civillian" => "OKLG 平民",
          _ => value,
       };
+   }
+
+   private static string TranslatePersonModuleValuePreservingColor( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var colorMatch = ColorTagWrapperRegex.Match( value );
+      if( colorMatch.Success )
+      {
+         var translatedBody = TranslatePersonModuleScalarValue( colorMatch.Groups[ "body" ].Value, hookName + ".body" );
+         return string.Equals( translatedBody, colorMatch.Groups[ "body" ].Value, StringComparison.Ordinal )
+            ? value
+            : colorMatch.Groups[ "prefix" ].Value + translatedBody + colorMatch.Groups[ "suffix" ].Value;
+      }
+
+      return TranslatePersonModuleScalarValue( value, hookName );
+   }
+
+   private static string TranslatePersonModuleDelimitedValuesPreservingColor( string value, string hookName, Func<string, string, string> itemTranslator )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+      if( itemTranslator == null ) return value;
+
+      var colorMatch = ColorTagWrapperRegex.Match( value );
+      if( colorMatch.Success )
+      {
+         var translatedBody = TranslatePersonModuleDelimitedValuesPreservingColor( colorMatch.Groups[ "body" ].Value, hookName + ".body", itemTranslator );
+         return string.Equals( translatedBody, colorMatch.Groups[ "body" ].Value, StringComparison.Ordinal )
+            ? value
+            : colorMatch.Groups[ "prefix" ].Value + translatedBody + colorMatch.Groups[ "suffix" ].Value;
+      }
+
+      var parts = value.Split( new[] { ", " }, StringSplitOptions.None );
+      var changed = false;
+      for( var i = 0; i < parts.Length; i++ )
+      {
+         var translatedPart = itemTranslator( parts[ i ], hookName + "." + i );
+         if( string.Equals( translatedPart, parts[ i ], StringComparison.Ordinal ) ) continue;
+
+         parts[ i ] = translatedPart;
+         changed = true;
+      }
+
+      return changed ? string.Join( ", ", parts ) : value;
+   }
+
+   private static string TranslatePersonModuleScalarValue( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      return PersonModuleExactValueMap.TryGetValue( value, out var exactValue ) ? exactValue : value;
    }
 
    public static string TranslateFerryDestinationLabel( string value, string hookName )
@@ -1639,11 +1793,105 @@ internal static class CrewBarRuntimeTranslationHelper
    }
 }
 
+[HarmonyPatch]
+internal static class CrewSim_Walk_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "CrewSim" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "CrewSim" ), "Walk", Type.EmptyTypes );
+   }
+
+   private static void Prefix( out bool __state )
+   {
+      __state = false;
+
+      var selectedCrew = GetSelectedCrew();
+      if( selectedCrew == null ) return;
+
+      __state = !HasCond( selectedCrew, "IsAIManual" );
+   }
+
+   private static void Postfix( bool __state )
+   {
+      if( !__state ) return;
+
+      var selectedCrew = GetSelectedCrew();
+      if( selectedCrew == null ) return;
+      if( !HasCond( selectedCrew, "IsAIManual" ) ) return;
+
+      var crewSimType = GameTypeResolver.Get( "CrewSim" );
+      if( crewSimType == null ) return;
+
+      AccessTools.Method( crewSimType, "AIManual", new[] { typeof( bool ) } )?.Invoke( null, new object[] { false } );
+   }
+
+   private static object GetSelectedCrew()
+   {
+      var crewSimType = GameTypeResolver.Get( "CrewSim" );
+      return AccessTools.Method( crewSimType, "GetSelectedCrew", Type.EmptyTypes )?.Invoke( null, null );
+   }
+
+   private static bool HasCond( object condOwner, string condName )
+   {
+      return (bool?)AccessTools.Method( condOwner.GetType(), "HasCond", new[] { typeof( string ) } )?.Invoke( condOwner, new object[] { condName } ) ?? false;
+   }
+}
+
 internal static class LogMessageRuntimeTranslationHelper
 {
    private static readonly Regex RichTextLeadingYouMixedClauseRegex = new Regex( @"(^|\r?\n)(?<prefix>(?:<[^>]+>|\s)*)You\s*(?:have|has|are|feel|feels|gain|gains|need|needs|suffer(?:s)?(?:\s+from)?)\s*(?=[\u3400-\u9FFF\uF900-\uFAFF])", RegexOptions.Compiled | RegexOptions.IgnoreCase );
    private static readonly Regex RichTextLeadingYouBeforeCjkRegex = new Regex( @"(^|\r?\n)(?<prefix>(?:<[^>]+>|\s)*)You\s*(?=[\u3400-\u9FFF\uF900-\uFAFF])", RegexOptions.Compiled | RegexOptions.IgnoreCase );
    private static readonly Regex MixedStandaloneTheRegex = new Regex( @"(?<![A-Za-z])the\s+(?=(?:<[^>]+>)*[\u3400-\u9FFF0-9])", RegexOptions.Compiled | RegexOptions.IgnoreCase );
+   private static readonly Regex GivesItemToTargetRegex = new Regex( @"^(?<subject>.+?) gives (?<item>.+?) to (?<target>.+?)\.$", RegexOptions.Compiled | RegexOptions.CultureInvariant );
+   private static readonly Regex CancelsCurrentActionRegex = new Regex( @"^(?<subject>.+?) cancels (?<owner>.+?) current action\.$", RegexOptions.Compiled | RegexOptions.CultureInvariant );
+   private static readonly Regex MixedYourCurrentActionRegex = new Regex( @"\byour(?=\s+当前动作\b)", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant );
+   private static readonly Regex StartsOpeningTargetRegex = new Regex( @"(?<action>开始(?:撬)?开|开始打开)\s*(?<target>(?:the\s+)?[A-Za-z][A-Za-z0-9'\- ]+?)(?<punct>[。.!?])", RegexOptions.Compiled | RegexOptions.CultureInvariant );
+   private static readonly IReadOnlyDictionary<string, string> MixedGrammarTokenMap = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase )
+   {
+      [ "you" ] = "你",
+      [ "your" ] = "你的",
+      [ "yours" ] = "你的",
+      [ "yourself" ] = "你自己",
+      [ "me" ] = "我",
+      [ "my" ] = "我的",
+      [ "myself" ] = "我自己",
+      [ "them" ] = "他们",
+      [ "their" ] = "他们的",
+      [ "themself" ] = "他们自己",
+      [ "he" ] = "他",
+      [ "his" ] = "他的",
+      [ "him" ] = "他",
+      [ "himself" ] = "他自己",
+      [ "she" ] = "她",
+      [ "her" ] = "她的",
+      [ "herself" ] = "她自己",
+      [ "it" ] = "它",
+      [ "its" ] = "它的",
+      [ "itself" ] = "它自己",
+      [ "sneer" ] = "冷笑",
+      [ "sneers" ] = "冷笑",
+      [ "mutter" ] = "咕哝",
+      [ "mutters" ] = "咕哝",
+      [ "finds" ] = "发现",
+      [ "find" ] = "发现",
+      [ "knows" ] = "知道",
+      [ "know" ] = "知道",
+      [ "pretends" ] = "假装",
+      [ "pretend" ] = "假装",
+   };
+   private static readonly IReadOnlyDictionary<string, string> ExactLogTokenMap = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase )
+   {
+      [ "Gate A Airlock" ] = "A号闸门气闸",
+      [ "Gate B Airlock" ] = "B号闸门气闸",
+      [ "Gate C Airlock" ] = "C号闸门气闸",
+   };
+   private static readonly Regex MixedGrammarTokenRegex = new Regex( @"\b(?:you|your|yours|yourself|me|my|myself|them|their|themself|he|his|him|himself|she|her|herself|it|its|itself|sneer|sneers|mutter|mutters|finds|find|knows|know|pretends|pretend)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant );
+   private static readonly Regex SneerMutterNamePattern = new Regex( @"\s对\s+你\s+冷笑\s+并\s+咕哝\s+用多国语言诅咒\s+你的\s+名字", RegexOptions.Compiled | RegexOptions.CultureInvariant );
 
    public static string TranslateMessage( string value )
    {
@@ -1661,7 +1909,27 @@ internal static class LogMessageRuntimeTranslationHelper
             + "。";
       }
 
-      return NormalizeMixedMessageText( value );
+      var normalized = value;
+      normalized = normalized.Replace( "Items required first. Adding tasks now.", "所需物品不足。正在补充任务。" );
+      normalized = GivesItemToTargetRegex.Replace( normalized, match =>
+         TranslateLogToken( match.Groups[ "subject" ].Value, "CondOwner.LogMessage.gives.subject" )
+         + "将"
+         + TranslateLogToken( match.Groups[ "item" ].Value, "CondOwner.LogMessage.gives.item" )
+         + "交给"
+         + TranslateLogToken( match.Groups[ "target" ].Value, "CondOwner.LogMessage.gives.target" )
+         + "。" );
+      normalized = CancelsCurrentActionRegex.Replace( normalized, match =>
+         TranslateLogToken( match.Groups[ "subject" ].Value, "CondOwner.LogMessage.cancel.subject" )
+         + "取消了"
+         + TranslateOwnershipToken( match.Groups[ "owner" ].Value )
+         + "当前动作。" );
+      normalized = MixedYourCurrentActionRegex.Replace( normalized, "你的" );
+      normalized = StartsOpeningTargetRegex.Replace( normalized, match =>
+         match.Groups[ "action" ].Value
+         + TranslateLogToken( match.Groups[ "target" ].Value, "CondOwner.LogMessage.open.target" )
+         + match.Groups[ "punct" ].Value );
+
+      return NormalizeMixedMessageText( normalized );
    }
 
    public static string TranslateLogMarkup( string value, string hookName )
@@ -1669,7 +1937,13 @@ internal static class LogMessageRuntimeTranslationHelper
       if( string.IsNullOrWhiteSpace( value ) ) return value;
 
       var translated = OstranautsTranslatorPlugin.Translate( value, hookName );
-      return NormalizeMixedMessageText( translated );
+      var lines = translated.Replace( "\r\n", "\n" ).Split( '\n' );
+      for( var i = 0; i < lines.Length; i++ )
+      {
+         lines[ i ] = TranslateMessage( lines[ i ] );
+      }
+
+      return string.Join( "\n", lines );
    }
 
    public static string NormalizeMixedMessageText( string value )
@@ -1678,7 +1952,33 @@ internal static class LogMessageRuntimeTranslationHelper
 
       var normalized = RichTextLeadingYouMixedClauseRegex.Replace( value, match => match.Groups[ 1 ].Value + match.Groups[ "prefix" ].Value + "你" );
       normalized = RichTextLeadingYouBeforeCjkRegex.Replace( normalized, match => match.Groups[ 1 ].Value + match.Groups[ "prefix" ].Value + "你" );
-      return MixedStandaloneTheRegex.Replace( normalized, string.Empty );
+      normalized = MixedStandaloneTheRegex.Replace( normalized, string.Empty );
+      normalized = TranslateMixedGrammarTokens( normalized );
+      normalized = SneerMutterNamePattern.Replace( normalized, " 对你冷笑，并咕哝着用多国语言诅咒你的名字" );
+      return normalized;
+   }
+
+   private static string TranslateMixedGrammarTokens( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+      if( !ContainsCjkCharacters( value ) ) return value;
+
+      return MixedGrammarTokenRegex.Replace( value, match =>
+      {
+         return MixedGrammarTokenMap.TryGetValue( match.Value, out var translated )
+            ? translated
+            : match.Value;
+      } );
+   }
+
+   private static bool ContainsCjkCharacters( string value )
+   {
+      foreach( var ch in value )
+      {
+         if( ch >= 0x2E80 && ch <= 0x9FFF ) return true;
+      }
+
+      return false;
    }
 
    private static string TranslateToken( string value, string hookName )
@@ -1702,6 +2002,39 @@ internal static class LogMessageRuntimeTranslationHelper
       }
 
       return value;
+   }
+
+   private static string TranslateOwnershipToken( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var trimmed = value.Trim();
+      return MixedGrammarTokenMap.TryGetValue( trimmed, out var translated )
+         ? translated
+         : trimmed;
+   }
+
+   private static string TranslateLogToken( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var trimmed = value.Trim();
+      if( ExactLogTokenMap.TryGetValue( trimmed, out var exactTranslated ) )
+      {
+         return exactTranslated;
+      }
+
+      if( trimmed.StartsWith( "the ", StringComparison.OrdinalIgnoreCase ) )
+      {
+         trimmed = trimmed.Substring( 4 ).TrimStart();
+         if( ExactLogTokenMap.TryGetValue( trimmed, out exactTranslated ) )
+         {
+            return exactTranslated;
+         }
+      }
+
+      var translated = TranslateToken( trimmed, hookName );
+      return NormalizeMixedMessageText( translated );
    }
 }
 
@@ -2517,6 +2850,11 @@ internal static class TooltipRuntimeTranslationHelper
 {
    private static readonly Regex PersonNameTokenPattern = new Regex( "[A-Za-z][A-Za-z'’-]*", RegexOptions.CultureInvariant );
    private static readonly Regex EmbeddedPersonNamePattern = new Regex( "\\b[A-Z][A-Za-z'’-]+(?:\\s+[A-Z][A-Za-z'’-]+){2,}\\b", RegexOptions.CultureInvariant );
+   private static readonly Regex FailedAttemptsHeadingRegex = new Regex( @"<b>Last Failed(?:\s+[^<:]+)?\s+Attempts:</b>", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase );
+   private static readonly Regex ActivePledgeHeadingRegex = new Regex( @"<b>Last Active Pledge:</b>", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase );
+   private static readonly Regex SecondsAgoRegex = new Regex( @"(?<prefix>.*?),\s*(?<seconds>\d+(?:[\.,]\d+)?)s ago$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase );
+   private static readonly Regex GivesItemToTargetRegex = new Regex( @"^(?<subject>.+?) gives (?<item>.+?) to (?<target>.+?)\.$", RegexOptions.CultureInvariant );
+   private static readonly Regex TempTokenRegex = new Regex( @"\bTEMP\b", RegexOptions.CultureInvariant );
    private static readonly HashSet<string> LoggedCrewTooltipDiagnostics = new HashSet<string>( StringComparer.Ordinal );
 
    private static readonly IReadOnlyDictionary<string, string> ExactPersonNameTokenMap = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase )
@@ -2526,13 +2864,28 @@ internal static class TooltipRuntimeTranslationHelper
       [ "Oluwakemi" ] = "奥卢瓦克米",
    };
 
+   private static readonly IReadOnlyDictionary<string, string> ExactDisplayNameMap = new Dictionary<string, string>( StringComparer.Ordinal )
+   {
+      [ "Renbao \"Portal\" PDA Cart Compartment" ] = "仁宝“门户”PDA卡槽",
+      [ "PDA Cart Compartment" ] = "PDA卡槽",
+      [ "Cart Compartment" ] = "PDA卡槽",
+      [ "仁宝“门户”PDA推车储物格" ] = "仁宝“门户”PDA卡槽",
+      [ "PDA推车储物格" ] = "PDA卡槽",
+      [ "推车隔间" ] = "PDA卡槽",
+   };
+
    public static string TranslateCondOwnerDisplayName( string value, object condOwner, string hookName )
    {
       if( string.IsNullOrWhiteSpace( value ) ) return value;
 
+      if( TryTranslateDisplayNameExact( value, out var exactTranslatedValue ) )
+      {
+         return exactTranslatedValue;
+      }
+
       foreach( var sourceName in EnumerateKnownDisplayNames( condOwner ) )
       {
-         var translatedName = TranslatePersonName( sourceName, hookName + "." + sourceName );
+         var translatedName = TranslateKnownDisplayName( sourceName, hookName + "." + sourceName );
          if( string.Equals( translatedName, sourceName, StringComparison.Ordinal ) ) continue;
 
          if( value.Contains( sourceName, StringComparison.Ordinal ) )
@@ -2668,8 +3021,8 @@ internal static class TooltipRuntimeTranslationHelper
       translated = translated.Replace( "\n\n<b>Current:</b>", "\n\n<b>当前：</b>" );
       translated = translated.Replace( "\n\n<b>Log:</b>", "\n\n<b>日志：</b>" );
       translated = translated.Replace( "\n\n<b>Planned:</b>", "\n\n<b>计划：</b>" );
-      translated = translated.Replace( "\n\n<b>Last Failed Work Attempts:</b>", "\n\n<b>最近失败的工作尝试：</b>" );
-      translated = translated.Replace( "\n\n<b>Last Active Pledge:</b>\n", "\n\n<b>最近一次生效誓约：</b>\n" );
+      translated = FailedAttemptsHeadingRegex.Replace( translated, "<b>最近失败的工作尝试：</b>" );
+      translated = ActivePledgeHeadingRegex.Replace( translated, "<b>最近一次生效誓约：</b>" );
 
       var lines = translated.Split( '\n' );
       for( var i = 0; i < lines.Length; i++ )
@@ -2678,22 +3031,45 @@ internal static class TooltipRuntimeTranslationHelper
          var trimmed = line.Trim();
          if( string.IsNullOrWhiteSpace( trimmed ) ) continue;
 
-         if( string.Equals( trimmed, "none", StringComparison.Ordinal ) )
-         {
-            lines[ i ] = line.Replace( "none", "无" );
-            continue;
-         }
-
-         if( trimmed.EndsWith( "s ago", StringComparison.Ordinal ) )
-         {
-            lines[ i ] = line.Substring( 0, line.LastIndexOf( "s ago", StringComparison.Ordinal ) ) + "秒前";
-            continue;
-         }
-
-         lines[ i ] = RuntimeTextHookHelper.TranslateTextValue( line, hookName + "[" + i + "]" );
+         var translatedLine = RuntimeTextHookHelper.TranslateTextValue( line, hookName + "[" + i + "]" );
+         lines[ i ] = NormalizeCrewTooltipLine( translatedLine );
       }
 
       return string.Join( "\n", lines );
+   }
+
+   private static string NormalizeCrewTooltipLine( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var normalized = value;
+      var trimmed = normalized.Trim();
+      if( string.Equals( trimmed, "none", StringComparison.OrdinalIgnoreCase ) )
+      {
+         return normalized.Replace( trimmed, "无" );
+      }
+
+      if( FailedAttemptsHeadingRegex.IsMatch( trimmed ) )
+      {
+         return normalized.Replace( trimmed, "<b>最近失败的工作尝试：</b>" );
+      }
+
+      if( ActivePledgeHeadingRegex.IsMatch( trimmed ) )
+      {
+         return normalized.Replace( trimmed, "<b>最近一次生效誓约：</b>" );
+      }
+
+      normalized = normalized.Replace( "Last Failed 工作 Attempts:", "最近失败的工作尝试：" );
+      normalized = normalized.Replace( "安装中 TEMP", "安装中 临时占位件" );
+      normalized = SecondsAgoRegex.Replace( normalized, match => match.Groups[ "prefix" ].Value + ", " + match.Groups[ "seconds" ].Value + "秒前" );
+      normalized = normalized.Replace( "Items required first. Adding tasks now.", "所需物品不足。正在补充任务。" );
+      normalized = normalized.Replace( "EMT Placeholder", "EMT 占位件" );
+      normalized = normalized.Replace( "Placeholder", "占位件" );
+      normalized = TempTokenRegex.Replace( normalized, "临时" );
+      normalized = GivesItemToTargetRegex.Replace( normalized, match =>
+         match.Groups[ "subject" ].Value + "将" + match.Groups[ "item" ].Value + "交给" + match.Groups[ "target" ].Value + "。" );
+
+      return normalized;
    }
 
    private static string ReplaceCrewName( string value, object crewMember, string hookName )
@@ -2837,7 +3213,7 @@ internal static class TooltipRuntimeTranslationHelper
    {
       foreach( var displayName in EnumerateKnownDisplayNames( target ) )
       {
-         var translatedName = TranslatePersonName( displayName, hookName + "." + displayName );
+         var translatedName = TranslateKnownDisplayName( displayName, hookName + "." + displayName );
          if( !string.Equals( translatedName, displayName, StringComparison.Ordinal ) )
          {
             return translatedName;
@@ -2892,6 +3268,11 @@ internal static class TooltipRuntimeTranslationHelper
    {
       if( string.IsNullOrWhiteSpace( value ) ) return value;
 
+      if( TryTranslateDisplayNameExact( value, out var exactTranslatedValue ) )
+      {
+         return exactTranslatedValue;
+      }
+
       if( TryTranslatePersonNameTokenFromLookup( value, out var exactTranslated ) )
       {
          return exactTranslated;
@@ -2934,6 +3315,24 @@ internal static class TooltipRuntimeTranslationHelper
       }
 
       return RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+   }
+
+   private static string TranslateKnownDisplayName( string value, string hookName )
+   {
+      if( TryTranslateDisplayNameExact( value, out var exactTranslatedValue ) )
+      {
+         return exactTranslatedValue;
+      }
+
+      return TranslatePersonName( value, hookName );
+   }
+
+   private static bool TryTranslateDisplayNameExact( string value, out string translatedValue )
+   {
+      translatedValue = string.Empty;
+      if( string.IsNullOrWhiteSpace( value ) ) return false;
+
+      return ExactDisplayNameMap.TryGetValue( value, out translatedValue );
    }
 }
 
@@ -3116,12 +3515,54 @@ internal static class MessageDisplayRuntimeTranslationHelper
       [ "OPERATIONAL" ] = "运行正常",
       [ "Connection established" ] = "连接已建立",
    };
+   private static readonly IReadOnlyDictionary<string, string> ConversationWordMap = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase )
+   {
+      [ "Alfa" ] = "阿尔法",
+      [ "Bravo" ] = "布拉沃",
+      [ "Charlie" ] = "查理",
+      [ "Delta" ] = "德尔塔",
+      [ "Echo" ] = "回声",
+      [ "Foxtrot" ] = "狐步",
+      [ "Golf" ] = "高尔夫",
+      [ "Hotel" ] = "酒店",
+      [ "India" ] = "印第亚",
+      [ "Juliett" ] = "朱丽叶",
+      [ "Kilo" ] = "千克",
+      [ "Lima" ] = "利马",
+      [ "Mike" ] = "迈克",
+      [ "November" ] = "十一月",
+      [ "Oscar" ] = "奥斯卡",
+      [ "Papa" ] = "帕帕",
+      [ "Quebec" ] = "魁北克",
+      [ "Romeo" ] = "罗密欧",
+      [ "Sierra" ] = "塞拉",
+      [ "Tango" ] = "探戈",
+      [ "Uniform" ] = "制服",
+      [ "Victor" ] = "维克托",
+      [ "Whiskey" ] = "威士忌",
+      [ "X-ray" ] = "X光",
+      [ "Yankee" ] = "扬基",
+      [ "Zulu" ] = "祖鲁",
+      [ "Zero" ] = "零",
+      [ "One" ] = "一",
+      [ "Two" ] = "二",
+      [ "Three" ] = "三",
+      [ "Four" ] = "四",
+      [ "Five" ] = "五",
+      [ "Six" ] = "六",
+      [ "Seven" ] = "七",
+      [ "Eight" ] = "八",
+      [ "Nine" ] = "九",
+   };
+   private static readonly Regex ConversationTokenRegex = new Regex( @"(?<![A-Za-z])(?<token>[A-Z][A-Za-z0-9'’-]*(?:(?:\s*-\s*|\s+)[A-Z][A-Za-z0-9'’-]*)*)(?![A-Za-z])", RegexOptions.Compiled | RegexOptions.CultureInvariant );
+   private static readonly Regex ConversationTokenSeparatorRegex = new Regex( @"(\s*-\s*|\s+)", RegexOptions.Compiled | RegexOptions.CultureInvariant );
 
    public static void TranslateUi( object messageDisplay )
    {
       TranslateStatusMessages( messageDisplay );
       RuntimeTextHookHelper.TranslateHierarchy( RuntimeTextHookHelper.GetGameObject( messageDisplay ), "GUIMessageDisplay" );
       TranslateRenderedStatusText( messageDisplay );
+      TranslateRenderedConversationText( messageDisplay );
    }
 
    public static string TranslateStatusText( string value )
@@ -3142,7 +3583,8 @@ internal static class MessageDisplayRuntimeTranslationHelper
       if( string.IsNullOrWhiteSpace( value ) ) return value;
 
       var translated = value.Replace( "Connection established", TranslateStatusText( "Connection established" ) );
-      return MfdRuntimeTranslationHelper.TranslateDisplayText( translated );
+      translated = MfdRuntimeTranslationHelper.TranslateDisplayText( translated );
+      return NormalizeConversationIdentifiers( translated, "GUIMessageDisplay.ShowPanel" );
    }
 
    public static void TranslateMessageObject( object shipMessage )
@@ -3175,7 +3617,7 @@ internal static class MessageDisplayRuntimeTranslationHelper
       translated = TranslateReadyToProceedText( value );
       translated = TranslateHailsText( translated );
       translated = TranslateConversationResidualText( translated );
-      return translated;
+      return NormalizeConversationIdentifiers( translated, "GUIMessageDisplay.MessageText" );
    }
 
    public static string TranslateRenderedStatusMarkup( string value )
@@ -3201,6 +3643,26 @@ internal static class MessageDisplayRuntimeTranslationHelper
       if( textProperty.GetValue( component ) is not string value || string.IsNullOrWhiteSpace( value ) ) return;
 
       var translated = TranslateRenderedStatusMarkup( value );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         textProperty.SetValue( component, translated );
+      }
+   }
+
+   public static void TranslateRenderedConversationText( object messageDisplay )
+   {
+      if( messageDisplay == null ) return;
+
+      var field = messageDisplay.GetType().GetField( "txtComms", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      var component = field?.GetValue( messageDisplay );
+      if( component == null ) return;
+
+      var textProperty = component.GetType().GetProperty( "text", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      if( textProperty == null || !textProperty.CanRead || !textProperty.CanWrite || textProperty.PropertyType != typeof( string ) ) return;
+
+      if( textProperty.GetValue( component ) is not string value || string.IsNullOrWhiteSpace( value ) ) return;
+
+      var translated = TranslateConversationRenderedText( value );
       if( !string.Equals( translated, value, StringComparison.Ordinal ) )
       {
          textProperty.SetValue( component, translated );
@@ -3260,6 +3722,62 @@ internal static class MessageDisplayRuntimeTranslationHelper
       return value;
    }
 
+   private static string TranslateConversationRenderedText( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = value.Replace( "Connection established", TranslateStatusText( "Connection established" ) );
+      translated = TranslateConversationResidualText( translated );
+      return NormalizeConversationIdentifiers( translated, "GUIMessageDisplay.RenderedText" );
+   }
+
+   private static string NormalizeConversationIdentifiers( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      return ConversationTokenRegex.Replace( value, match => TranslateConversationToken( match.Groups[ "token" ].Value, hookName + ".Token" ) );
+   }
+
+   private static string TranslateConversationToken( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      var parts = ConversationTokenSeparatorRegex.Split( value );
+      var changed = false;
+      for( var i = 0; i < parts.Length; i++ )
+      {
+         var part = parts[ i ];
+         if( string.IsNullOrEmpty( part ) || ConversationTokenSeparatorRegex.IsMatch( part ) ) continue;
+
+         var translatedPart = TranslateConversationWord( part, hookName + ".Part" + i );
+         if( !string.Equals( translatedPart, part, StringComparison.Ordinal ) )
+         {
+            parts[ i ] = translatedPart;
+            changed = true;
+         }
+      }
+
+      return changed ? string.Concat( parts ) : value;
+   }
+
+   private static string TranslateConversationWord( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      if( ConversationWordMap.TryGetValue( value, out var mappedValue ) )
+      {
+         return mappedValue;
+      }
+
+      return RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+   }
+
    private static string ReplaceExactToken( string value, string source, string replacement )
    {
       return value.Contains( source, StringComparison.Ordinal )
@@ -3305,6 +3823,47 @@ internal static class MooringRuntimeTranslationHelper
          : translated;
    }
 
+   public static void ApplyPanelSemanticLabels( object navModMooringControl )
+   {
+      if( navModMooringControl == null ) return;
+
+      var root = RuntimeTextHookHelper.GetGameObject( navModMooringControl );
+      if( root == null ) return;
+
+      var isMoored = IsMoored( navModMooringControl );
+      var actionLabel = isMoored ? "解锁" : "接合";
+
+      var getComponentsInChildren = typeof( UnityEngine.GameObject ).GetMethod( "GetComponentsInChildren", new[] { typeof( Type ), typeof( bool ) } );
+      if( getComponentsInChildren?.Invoke( root, new object[] { typeof( UnityEngine.Component ), true } ) is not IEnumerable components ) return;
+
+      foreach( var component in components )
+      {
+         var textProperty = component == null ? null : RuntimeHookTranslationHelper.GetStringProperty( component.GetType(), "text" );
+         if( textProperty?.CanRead != true || textProperty.CanWrite != true ) continue;
+
+         var value = textProperty.GetValue( component ) as string;
+         var replacement = value switch
+         {
+            "DOCK SYS CLAMP" or "Dock Sys Clamp" or "dock sys clamp" or "对接锁" => "已停泊",
+            "CLAMP ALIGN" or "Clamp Align" or "clamp align" or "锁扣对准" => "接合就绪",
+            "CLAMPS" or "Clamps" or "clamps" or "锁扣" or "TETHER" or "系泊" or "系绳" => actionLabel,
+            _ => null,
+         };
+
+         if( replacement != null && !string.Equals( replacement, value, StringComparison.Ordinal ) )
+         {
+            textProperty.SetValue( component, replacement );
+         }
+      }
+   }
+
+   private static bool IsMoored( object navModMooringControl )
+   {
+      var coSelf = RuntimeHookTranslationHelper.GetProperty( navModMooringControl.GetType(), "COSelf" )?.GetValue( navModMooringControl );
+      var ship = coSelf == null ? null : RuntimeHookTranslationHelper.GetProperty( coSelf.GetType(), "ship" )?.GetValue( coSelf );
+      return ship?.GetType().GetMethod( "IsMoored", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null )?.Invoke( ship, null ) as bool? == true;
+   }
+
    private static string ReplaceToken( string value, string token, string replacement )
    {
       var index = value.IndexOf( token, StringComparison.Ordinal );
@@ -3321,6 +3880,40 @@ internal static class DockingRuntimeTranslationHelper
       return value.StartsWith( "ZOOM RANGE: ", StringComparison.Ordinal )
          ? "缩放范围：" + value.Substring( "ZOOM RANGE: ".Length )
          : value;
+   }
+
+   public static void ApplyDockingPanelSemanticLabels( object guiDockSys )
+   {
+      if( guiDockSys == null ) return;
+
+      var root = RuntimeTextHookHelper.GetGameObject( guiDockSys );
+      if( root == null ) return;
+
+      var isDocked = IsDocked( guiDockSys );
+      var actionLabel = isDocked ? "解锁" : "接合";
+
+      var getComponentsInChildren = typeof( UnityEngine.GameObject ).GetMethod( "GetComponentsInChildren", new[] { typeof( Type ), typeof( bool ) } );
+      if( getComponentsInChildren?.Invoke( root, new object[] { typeof( UnityEngine.Component ), true } ) is not IEnumerable components ) return;
+
+      foreach( var component in components )
+      {
+         var textProperty = component == null ? null : RuntimeHookTranslationHelper.GetStringProperty( component.GetType(), "text" );
+         if( textProperty?.CanRead != true || textProperty.CanWrite != true ) continue;
+
+         var value = textProperty.GetValue( component ) as string;
+         var replacement = value switch
+         {
+            "DOCK SYS CLAMP" or "Dock Sys Clamp" or "dock sys clamp" or "对接锁" => "已对接",
+            "CLAMP ALIGN" or "Clamp Align" or "clamp align" or "锁扣对准" => "接合就绪",
+            "CLAMPS" or "Clamps" or "clamps" or "锁扣" => actionLabel,
+            _ => null,
+         };
+
+         if( replacement != null && !string.Equals( replacement, value, StringComparison.Ordinal ) )
+         {
+            textProperty.SetValue( component, replacement );
+         }
+      }
    }
 
    public static string TranslateDockTelemetryText( string value )
@@ -3357,6 +3950,14 @@ internal static class DockingRuntimeTranslationHelper
       }
 
       return value;
+   }
+
+   private static bool IsDocked( object guiDockSys )
+   {
+      var coSelf = RuntimeHookTranslationHelper.GetProperty( guiDockSys.GetType(), "COSelf" )?.GetValue( guiDockSys );
+      var ship = coSelf == null ? null : RuntimeHookTranslationHelper.GetProperty( coSelf.GetType(), "ship" )?.GetValue( coSelf );
+      var isDockedMethod = ship?.GetType().GetMethod( "IsDocked", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof( bool ) }, null );
+      return isDockedMethod?.Invoke( ship, new object[] { true } ) as bool? == true;
    }
 }
 
@@ -3482,7 +4083,6 @@ internal static class CondOwner_LogMessage_Hook
    private static void Prefix( ref string strMsg, ref string strShort )
    {
       strMsg = LogMessageRuntimeTranslationHelper.TranslateLogMarkup( strMsg, "CondOwner.LogMessage" );
-      strMsg = LogMessageRuntimeTranslationHelper.TranslateMessage( strMsg );
       if( !string.IsNullOrEmpty( strShort ) )
       {
          strShort = LogMessageRuntimeTranslationHelper.TranslateLogMarkup( strShort, "CondOwner.LogMessage.short" );
@@ -3552,6 +4152,7 @@ internal static class GUISocialCombat2_UpdateCO_Hook
          value => LogMessageRuntimeTranslationHelper.TranslateLogMarkup( value, "GUISocialCombat2.UpdateCO.txtMessageLog" ) );
 
       SocialCombatRuntimeTranslationHelper.TranslateFixedTexts( __instance, "GUISocialCombat2.UpdateCO.Fixed" );
+      SocialCombatRuntimeTranslationHelper.TranslateDynamicTexts( __instance, "GUISocialCombat2.UpdateCO.Dynamic" );
    }
 }
 
@@ -3579,6 +4180,27 @@ internal static class GUISocialCombat2_SetData_Hook
    private static void Postfix( object __instance )
    {
       SocialCombatRuntimeTranslationHelper.TranslateFixedTexts( __instance, "GUISocialCombat2.SetData.Fixed" );
+      SocialCombatRuntimeTranslationHelper.TranslateDynamicTexts( __instance, "GUISocialCombat2.SetData.Dynamic" );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUISocialCombat2_ChooseAction_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUISocialCombat2" ) != null
+         && GameTypeResolver.Get( "GUIContextButton" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "GUISocialCombat2" ), "ChooseAction", new[] { GameTypeResolver.Get( "GUIContextButton" ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      SocialCombatRuntimeTranslationHelper.TranslateDynamicTexts( __instance, "GUISocialCombat2.ChooseAction.Dynamic" );
    }
 }
 
@@ -3634,6 +4256,36 @@ internal static class SocialCombatRuntimeTranslationHelper
       SetButtonText( root, "pnlExit", "退出" );
       NormalizeKnownRootTexts( root, hookName + ".Root" );
       LogDiagnosticsOnce( root, hookName );
+   }
+
+   public static void TranslateDynamicTexts( object socialCombat, string hookName )
+   {
+      if( socialCombat == null ) return;
+
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged(
+         socialCombat,
+         "txtPreview",
+         value => TranslatePreviewText( value, hookName + ".txtPreview" ) );
+
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged(
+         socialCombat,
+         "txtEncTitle",
+         value => RuntimeTextHookHelper.TranslateTextValue( value, hookName + ".txtEncTitle" ) );
+
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged(
+         socialCombat,
+         "txtEncDesc",
+         value => RuntimeTextHookHelper.TranslateTextValue( value, hookName + ".txtEncDesc" ) );
+
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged(
+         socialCombat,
+         "txtObjectiveTitle",
+         value => RuntimeTextHookHelper.TranslateTextValue( value, hookName + ".txtObjectiveTitle" ) );
+
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged(
+         socialCombat,
+         "txtObjective",
+         value => RuntimeTextHookHelper.TranslateTextValue( value, hookName + ".txtObjective" ) );
    }
 
    private static void NormalizeKnownRootTexts( UnityEngine.GameObject root, string hookName )
@@ -3751,6 +4403,23 @@ internal static class SocialCombatRuntimeTranslationHelper
       return translated;
    }
 
+   private static string TranslatePreviewText( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      translated = ReplaceOrdinal( translated, "Us: ", "我方：" );
+      translated = ReplaceOrdinal( translated, "Them: ", "对方：" );
+      translated = ReplaceOrdinal( translated, "Consumes one ", "消耗一个" );
+      translated = ReplaceOrdinal( translated, "Uses one ", "使用一个" );
+      translated = ReplaceOrdinal( translated, "Requires ", "需要" );
+      translated = ReplaceOrdinal( translated, "Not always available. ", "并非总是可用。" );
+      translated = ReplaceOrdinal( translated, "Keeps control. ", "保持主动权。" );
+      translated = ReplaceOrdinal( translated, "\nFunds: $", "\n资金：$" );
+      translated = ReplaceOrdinal( translated, "\nCost: ", "\n成本：" );
+      return translated;
+   }
+
    private static void SetButtonText( UnityEngine.GameObject root, string buttonPath, string value )
    {
       var button = FindChildGameObject( root, buttonPath );
@@ -3760,6 +4429,16 @@ internal static class SocialCombatRuntimeTranslationHelper
       {
          RuntimeHookTranslationHelper.SetTextComponentProperty( component, value );
       }
+   }
+
+   private static string ReplaceOrdinal( string source, string oldValue, string newValue )
+   {
+      if( string.IsNullOrEmpty( source ) || string.IsNullOrEmpty( oldValue ) ) return source;
+
+      var index = source.IndexOf( oldValue, StringComparison.Ordinal );
+      if( index < 0 ) return source;
+
+      return source.Substring( 0, index ) + newValue + source.Substring( index + oldValue.Length );
    }
 
    private static IEnumerable EnumerateTextComponents( UnityEngine.GameObject root )
@@ -4337,14 +5016,41 @@ internal static class AlarmObjective_Constructors_Hook
 [HarmonyPatch]
 internal static class TutorialObjectiveRuntimeTranslationHelper
 {
-   private static readonly Regex ToggleLightSwitchDescriptionRegex = new Regex(
-      @"^Press\s+(?<glyph>.+?)\s+on the nearby Power Switch\.\s+Select\s+.+?\s+to turn on the lights\.$",
-      RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.IgnoreCase );
-
    public static void TranslateObjectivePanelText( object objectivePanel, string hookName )
    {
       RuntimeHookTranslationHelper.TranslateTextComponentField( objectivePanel, "_txtTitle", value => TranslateObjectiveTitle( value, hookName + "._txtTitle" ) );
       RuntimeHookTranslationHelper.TranslateTextComponentField( objectivePanel, "_txtDescription", value => TranslateObjectiveDescription( value, hookName + "._txtDescription" ) );
+   }
+
+   public static void TranslateObjectivePanelFromSource( object objectivePanel, string hookName )
+   {
+      if( !TryGetTutorialObjectiveSource( objectivePanel, out var title, out var description ) )
+      {
+         TranslateObjectivePanelText( objectivePanel, hookName );
+         return;
+      }
+
+      RuntimeHookTranslationHelper.SetTextComponentField( objectivePanel, "_txtTitle", TranslateObjectiveTitle( title, hookName + "._txtTitle.source" ) );
+      RuntimeHookTranslationHelper.SetTextComponentField( objectivePanel, "_txtDescription", TranslateObjectiveDescription( description, hookName + "._txtDescription.source" ) );
+   }
+
+   private static bool TryGetTutorialObjectiveSource( object objectivePanel, out string title, out string description )
+   {
+      title = null;
+      description = null;
+
+      if( objectivePanel == null ) return false;
+
+      var objective = RuntimeHookTranslationHelper.GetInstanceField( objectivePanel.GetType(), "_objective" )?.GetValue( objectivePanel );
+      if( objective == null ) return false;
+
+      var tutorialBeat = RuntimeHookTranslationHelper.GetInstanceField( objective.GetType(), "TutorialBeat" )?.GetValue( objective );
+      if( tutorialBeat == null ) return false;
+
+      title = RuntimeHookTranslationHelper.GetProperty( tutorialBeat.GetType(), "ObjectiveName" )?.GetValue( tutorialBeat ) as string;
+      description = RuntimeHookTranslationHelper.GetProperty( tutorialBeat.GetType(), "ObjectiveDesc" )?.GetValue( tutorialBeat ) as string;
+
+      return !string.IsNullOrWhiteSpace( title ) && !string.IsNullOrWhiteSpace( description );
    }
 
    private static string TranslateObjectiveTitle( string value, string hookName )
@@ -4359,18 +5065,202 @@ internal static class TutorialObjectiveRuntimeTranslationHelper
       };
    }
 
-   private static string TranslateObjectiveDescription( string value, string hookName )
-   {
+      private static string TranslateObjectiveDescription( string value, string hookName )
+      {
       if( string.IsNullOrWhiteSpace( value ) ) return value;
 
-      var toggleLightSwitchMatch = ToggleLightSwitchDescriptionRegex.Match( value );
-      if( toggleLightSwitchMatch.Success )
+      var templateTranslated = TranslateObjectiveDescriptionTemplate( value );
+      if( !string.IsNullOrEmpty( templateTranslated ) )
       {
-         var glyphs = toggleLightSwitchMatch.Groups[ "glyph" ].Value;
-         return "按 " + glyphs + " 点击附近的电源开关。选择“切换电力”以打开照明。";
+         return templateTranslated;
       }
 
       return RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+   }
+
+   private static string TranslateObjectiveDescriptionTemplate( string value )
+   {
+      var translated = TryTranslateSingleGlyphTemplate( value, "Tap the \"", "\" until it is spinning counter-clockwise.", "点击“", "”直到飞船开始逆时针旋转。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, "Tap the \"", "\" key to rotate your ship clockwise.", "点击“", "”键，让飞船顺时针旋转。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, "Press '", "' and then the DEFAULT button to hide wear & damage overlay again.", "按“", "”，然后点击 DEFAULT 按钮，再次隐藏磨损与损坏覆盖层。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, "Press '", "' and then the DAMAGE button to see how worn-out or damaged items are.", "按“", "”，然后点击 DAMAGE 按钮，查看物品的磨损或损坏程度。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, "Press the \"", "\" key to reduce VREL below 10 m/s again (with OKLG targeted).", "按“", "”键，将 VREL 再次降到 10 m/s 以下（已锁定 OKLG）。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, "Press the \"", "\" key to reduce VREL to below 100 m/s again (with OKLG targeted).", "按“", "”键，将 VREL 再次降到 100 m/s 以下（已锁定 OKLG）。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, "Press the \"", "\" key to thrust backward up to 200 m/s VREL (with OKLG targeted).", "按“", "”键，向后推进至最高 200 m/s 的 VREL（已锁定 OKLG）。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, "Press the \"", "\" key to thrust right up to 200 m/s VREL (with OKLG targeted).", "按“", "”键，向右推进至最高 200 m/s 的 VREL（已锁定 OKLG）。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, "Hold \"", "\" until the ship stops spinning.", "按住“", "”直到飞船停止旋转。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, "There's a loose conduit in the hallway. Reinstall it for a karmic reward. Start by pressing ", " on it.", "走廊里有一根松脱的导管。把它装回去会有善报。先对它按 ", "。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, "Overlay the Placeholder Conduit in its intended location, then press ", " to begin installation.", "将占位导管覆盖到预定位置上，然后按 ", " 开始安装。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, string.Empty, " the rack's contents to move each item from the rack to your inventory.", "按 ", " 将货架中的每件物品移到你的物品栏中。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, "Hold ", " to see hotkeys and nearby interactable objects.", "按住 ", " 以显示快捷键和附近可交互的物体。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, "Toggle \"Match Speed\" (", ") on to automatically match your targets speed and rotation.", "打开“速度匹配”（", "），自动匹配目标的速度和旋转。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, "Press ", " on this window to focus on the objective's target.", "在此窗口上按 ", "，将视角聚焦到目标位置。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, string.Empty, " the Nav Station, then select Use.", "对导航站按 ", "，然后选择“使用”。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, "Pick up the yellow salvage permit on the ground. ", " it and select \"Read\".", "捡起地上的黄色打捞许可证。对它按 ", "，然后选择“阅读”。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, string.Empty, " the nav station to RESTORE it, removing some wear & tear.", "对导航站按 ", " 以执行“修复”，去除部分磨损。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, string.Empty, " the same spot in the room repeatedly until the MTT displays 'Compartment'.", "对房间里的同一个位置反复按 ", "，直到 MTT 显示“舱室”。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, string.Empty, " any object to open the Mega Tooltip (MTT).", "对任意物体按 ", "，打开大型提示框（MTT）。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, string.Empty, " the \"Comms Controls\" button on the right side of the Nav console to see the Comms Controls.", "对导航控制台右侧的“通讯控制”按钮按 ", "，进入通讯控制界面。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, "Press '", "' or the triangle \"play\" button in the lower right time bar.", "按“", "”或右下角时间条上的三角形“播放”按钮。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, "Press ", " to bring up your vizor controls. Select the Power visualization.", "按 ", " 打开视镜控制，然后选择“电力”可视化。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateSingleGlyphTemplate( value, "Press ", " on the nearby Power Switch. Select Toggle Power to turn on the lights.", "按 ", " 点击附近的电源开关。选择“切换电力”以打开照明。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      translated = TryTranslateDoubleGlyphTemplate(
+         value,
+         "Press ",
+         " on your portrait, or press '",
+         "' to take a look at the items you have.",
+         ( clickGlyph, inventoryGlyph ) => "对你的角色肖像按 " + clickGlyph + "，或按“" + inventoryGlyph + "”查看你携带的物品。" );
+      if( !string.IsNullOrEmpty( translated ) ) return translated;
+
+      return string.Empty;
+   }
+
+   private static string TryTranslateSingleGlyphTemplate( string value, string prefix, string suffix, string translatedPrefix, string translatedSuffix )
+   {
+      if( value == null ) return string.Empty;
+      if( value.Length <= prefix.Length + suffix.Length ) return string.Empty;
+      if( !value.StartsWith( prefix, StringComparison.Ordinal ) ) return string.Empty;
+      if( !value.EndsWith( suffix, StringComparison.Ordinal ) ) return string.Empty;
+
+      var glyph = value.Substring( prefix.Length, value.Length - prefix.Length - suffix.Length );
+      return string.IsNullOrWhiteSpace( glyph )
+         ? string.Empty
+         : translatedPrefix + glyph + translatedSuffix;
+   }
+
+   private static string TryTranslateDoubleGlyphTemplate( string value, string prefix, string middle, string suffix, Func<string, string, string> translator )
+   {
+      if( value == null ) return string.Empty;
+      if( translator == null ) return string.Empty;
+      if( !value.StartsWith( prefix, StringComparison.Ordinal ) ) return string.Empty;
+      if( !value.EndsWith( suffix, StringComparison.Ordinal ) ) return string.Empty;
+
+      var middleIndex = value.IndexOf( middle, prefix.Length, StringComparison.Ordinal );
+      if( middleIndex < 0 ) return string.Empty;
+
+      var firstGlyph = value.Substring( prefix.Length, middleIndex - prefix.Length );
+      var secondGlyphStart = middleIndex + middle.Length;
+      var secondGlyphLength = value.Length - secondGlyphStart - suffix.Length;
+      if( secondGlyphLength <= 0 ) return string.Empty;
+
+      var secondGlyph = value.Substring( secondGlyphStart, secondGlyphLength );
+      if( string.IsNullOrWhiteSpace( firstGlyph ) || string.IsNullOrWhiteSpace( secondGlyph ) ) return string.Empty;
+
+      return translator( firstGlyph, secondGlyph );
+   }
+}
+
+[HarmonyPatch]
+internal static class RestoreNavStation_OnQuickActionButton_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.Core.Tutorials.RestoreNavStation" ) != null
+         && GameTypeResolver.Get( "GUIQuickActionButton" ) != null
+         && GameTypeResolver.Get( "CrewSimTut" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "Ostranauts.Core.Tutorials.RestoreNavStation" ),
+         "OnQuickActionButton",
+         new[] { GameTypeResolver.Get( "GUIQuickActionButton" ) } );
+   }
+
+   private static void Postfix( object __instance, object __0 )
+   {
+      if( __instance == null || __0 == null ) return;
+      if( IsFinished( __instance ) ) return;
+
+      var interaction = RuntimeHookTranslationHelper.GetProperty( __0.GetType(), "IA" )?.GetValue( __0 );
+      if( !IsRestoreActionForPlayerNavStation( interaction ) ) return;
+
+      RuntimeHookTranslationHelper.GetProperty( __instance.GetType(), "Finished" )?.SetValue( __instance, true );
+   }
+
+   private static bool IsRestoreActionForPlayerNavStation( object interaction )
+   {
+      if( interaction == null ) return false;
+
+      var duty = RuntimeHookTranslationHelper.GetInstanceField( interaction.GetType(), "strDuty" )?.GetValue( interaction ) as string;
+      var title = RuntimeHookTranslationHelper.GetInstanceField( interaction.GetType(), "strTitle" )?.GetValue( interaction ) as string;
+      if( !string.Equals( duty, "Restore", StringComparison.Ordinal )
+         && !string.Equals( title, "Restore", StringComparison.Ordinal ) ) return false;
+
+      var navStationRef = GetPlayerShipNavStationRef();
+      if( navStationRef == null ) return false;
+
+      var objThem = RuntimeHookTranslationHelper.GetProperty( interaction.GetType(), "objThem" )?.GetValue( interaction );
+      if( objThem == null ) return false;
+
+      if( ReferenceEquals( objThem, navStationRef ) ) return true;
+
+      var interactionTargetId = RuntimeHookTranslationHelper.GetProperty( objThem.GetType(), "strID" )?.GetValue( objThem ) as string;
+      var navStationId = RuntimeHookTranslationHelper.GetProperty( navStationRef.GetType(), "strID" )?.GetValue( navStationRef ) as string;
+      return !string.IsNullOrEmpty( interactionTargetId )
+         && !string.IsNullOrEmpty( navStationId )
+         && string.Equals( interactionTargetId, navStationId, StringComparison.Ordinal );
+   }
+
+   private static object GetPlayerShipNavStationRef()
+   {
+      var crewSimTutType = GameTypeResolver.Get( "CrewSimTut" );
+      return crewSimTutType?.GetProperty( "playerShipNavStationRef", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy )?.GetValue( null );
+   }
+
+   private static bool IsFinished( object tutorialBeat )
+   {
+      var finishedProperty = RuntimeHookTranslationHelper.GetProperty( tutorialBeat.GetType(), "Finished" );
+      return finishedProperty?.GetValue( tutorialBeat ) as bool? == true;
    }
 }
 
@@ -4412,7 +5302,7 @@ internal static class ObjectivePanel_SetData_Hook
 
    private static void Postfix( object __instance )
    {
-      TutorialObjectiveRuntimeTranslationHelper.TranslateObjectivePanelText( __instance, "ObjectivePanel.SetData" );
+      TutorialObjectiveRuntimeTranslationHelper.TranslateObjectivePanelFromSource( __instance, "ObjectivePanel.SetData" );
    }
 }
 
@@ -4431,7 +5321,7 @@ internal static class ObjectivePanel_RefreshText_Hook
 
    private static void Postfix( object __instance )
    {
-      TutorialObjectiveRuntimeTranslationHelper.TranslateObjectivePanelText( __instance, "ObjectivePanel.RefreshText" );
+      TutorialObjectiveRuntimeTranslationHelper.TranslateObjectivePanelFromSource( __instance, "ObjectivePanel.RefreshText" );
    }
 }
 
@@ -4848,6 +5738,7 @@ internal static class NavModMooringControl_UpdateText_Hook
    private static void Postfix( object __instance )
    {
       RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "txtTargetStatus", MooringRuntimeTranslationHelper.TranslateTargetStatusText );
+      MooringRuntimeTranslationHelper.ApplyPanelSemanticLabels( __instance );
 
       var tetherField = __instance == null ? null : RuntimeHookTranslationHelper.GetInstanceField( __instance.GetType(), "goTether" );
       if( tetherField?.GetValue( __instance ) is UnityEngine.GameObject tetherGameObject )
@@ -4921,6 +5812,7 @@ internal static class GUIDockSys_SetUI_Hook
    {
       RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "txtRNGETA", DockingRuntimeTranslationHelper.TranslateDockTelemetryText );
       RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "txtBRGVCRS", DockingRuntimeTranslationHelper.TranslateDockTelemetryText );
+      DockingRuntimeTranslationHelper.ApplyDockingPanelSemanticLabels( __instance );
    }
 }
 
@@ -5359,7 +6251,6 @@ internal static class MainMenuRuntimeTranslationHelper
 {
    private static readonly Dictionary<int, int> PendingRescans = new Dictionary<int, int>();
    private static readonly HashSet<string> LoggedVisiblePanels = new HashSet<string>( StringComparer.Ordinal );
-   private const int StartupWarmupTicks = 180;
 
    public static void TranslateNow( object mainMenu, string hookName )
    {
@@ -5383,10 +6274,7 @@ internal static class MainMenuRuntimeTranslationHelper
       if( mainMenu == null ) return;
 
       var instanceId = RuntimeHelpers.GetHashCode( mainMenu );
-      if( !PendingRescans.TryGetValue( instanceId, out var remainingTicks ) )
-      {
-         remainingTicks = StartupWarmupTicks;
-      }
+      if( !PendingRescans.TryGetValue( instanceId, out var remainingTicks ) ) return;
 
       TranslateMainMenu( mainMenu, "MainMenu.Deferred" );
       remainingTicks--;
@@ -5403,10 +6291,8 @@ internal static class MainMenuRuntimeTranslationHelper
    {
       var mainMenuGameObject = RuntimeTextHookHelper.GetGameObject( mainMenu );
       RuntimeTextHookHelper.TranslateHierarchy( mainMenuGameObject, hookName );
-      TranslateTextHierarchy( mainMenuGameObject, hookName + ".Special", ManualPanelRuntimeTranslationHelper.TranslateText );
       TranslateManualPanel( mainMenu, hookName + ".Manual" );
       InfoRuntimeTranslationHelper.TranslateInfoHierarchy( hookName + ".Info" );
-      LogVisiblePanelDiagnostics( mainMenu, hookName );
    }
 
    private static void TranslateManualPanel( object mainMenu, string hookName )
@@ -5670,11 +6556,6 @@ internal static class MainMenu_Awake_Hook
    {
       return AccessTools.Method( GameTypeResolver.Get( "MainMenu" ), "Awake", Type.EmptyTypes );
    }
-
-   private static void Postfix( object __instance )
-   {
-      MainMenuRuntimeTranslationHelper.TranslateNow( __instance, "MainMenu.Awake" );
-   }
 }
 
 [HarmonyPatch]
@@ -5708,11 +6589,6 @@ internal static class MainMenu_Start_Hook
    {
       return AccessTools.Method( GameTypeResolver.Get( "MainMenu" ), "Start", Type.EmptyTypes );
    }
-
-   private static void Postfix( object __instance )
-   {
-      MainMenuRuntimeTranslationHelper.TranslateNow( __instance, "MainMenu.Start" );
-   }
 }
 
 [HarmonyPatch]
@@ -5726,11 +6602,6 @@ internal static class MainMenu_RestartLoop_Hook
    private static MethodBase TargetMethod()
    {
       return AccessTools.Method( GameTypeResolver.Get( "MainMenu" ), "RestartLoop", Type.EmptyTypes );
-   }
-
-   private static void Postfix( object __instance )
-   {
-      MainMenuRuntimeTranslationHelper.TranslateNow( __instance, "MainMenu.RestartLoop" );
    }
 }
 
@@ -5947,6 +6818,39 @@ internal static class GUIMessageDisplay_AddMessage_Hook
    private static void Prefix( object __0 )
    {
       MessageDisplayRuntimeTranslationHelper.TranslateMessageObject( __0 );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIMessageDisplay_ShowLog_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.ShipGUIs.NavStation.GUIMessageDisplay" ) != null
+         && GameTypeResolver.Get( "Ostranauts.Ships.Comms.ShipMessage" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "Ostranauts.ShipGUIs.NavStation.GUIMessageDisplay" ),
+         "ShowLog",
+         new[] { typeof( List<> ).MakeGenericType( GameTypeResolver.Get( "Ostranauts.Ships.Comms.ShipMessage" ) ) } );
+   }
+
+   private static void Prefix( object __0 )
+   {
+      if( __0 is not IList values ) return;
+
+      for( var i = 0; i < values.Count; i++ )
+      {
+         MessageDisplayRuntimeTranslationHelper.TranslateMessageObject( values[ i ] );
+      }
+   }
+
+   private static void Postfix( object __instance )
+   {
+      MessageDisplayRuntimeTranslationHelper.TranslateUi( __instance );
    }
 }
 
@@ -6651,6 +7555,70 @@ internal static class GUIJobItem_SetData_Installable_Hook
    private static void Postfix( object __instance )
    {
       RuntimeHookTranslationHelper.TranslateTextComponentField( __instance, "_title", "GUIJobItem.SetData.installable" );
+   }
+}
+
+internal static class ProgressBarRuntimeTranslationHelper
+{
+   private static readonly IReadOnlyDictionary<string, string> JobTypeMap = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase )
+   {
+      [ "repair" ] = "修理",
+      [ "install" ] = "安装",
+      [ "uninstall" ] = "拆除",
+      [ "scrap" ] = "报废",
+      [ "dismantle" ] = "拆解",
+      [ "haul" ] = "搬运",
+      [ "mine" ] = "采掘",
+      [ "reload" ] = "装填",
+   };
+
+   public static string TranslateLabel( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, "ProgressBar.Activate.text" );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return translated;
+      }
+
+      foreach( var pair in JobTypeMap )
+      {
+         if( value.Equals( pair.Key, StringComparison.OrdinalIgnoreCase ) )
+         {
+            return pair.Value;
+         }
+
+         if( value.StartsWith( pair.Key, StringComparison.OrdinalIgnoreCase ) )
+         {
+            return pair.Value + value.Substring( pair.Key.Length );
+         }
+      }
+
+      return value;
+   }
+
+}
+
+[HarmonyPatch]
+internal static class ProgressBar_Activate_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.Components.ProgressBar" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "Ostranauts.Components.ProgressBar" ),
+         "Activate",
+         new[] { typeof( float ), typeof( bool ), GameTypeResolver.Get( "Interaction" ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeHookTranslationHelper.TranslateTextComponentField( __instance, "text", ProgressBarRuntimeTranslationHelper.TranslateLabel );
    }
 }
 

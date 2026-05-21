@@ -46,7 +46,7 @@ internal sealed class TranslationStatusWindow
          }
 
          GUI.Box( _windowRect, string.Empty );
-         _windowRect = GUI.Window( WindowId, _windowRect, CreateWindowUI, "---- OstranautsTranslator Status ----" );
+         _windowRect = GUI.Window( WindowId, _windowRect, CreateWindowUI, TranslateLiteral( "---- OstranautsTranslator Status ----", "StatusWindow.Title" ) );
       }
       finally
       {
@@ -72,10 +72,16 @@ internal sealed class TranslationStatusWindow
       var snapshot = _getSnapshot();
       var y = 30f;
 
-      GUI.Label( new Rect( 12f, y, windowWidth - 24f, 22f ), "F6 切换窗口" );
+      GUI.Label( new Rect( 12f, y, windowWidth - 24f, 22f ), TranslateTemplate( "{0} toggle window", "StatusWindow.ToggleHint", "F6" ) );
       y += 22f;
 
-      GUI.Label( new Rect( 12f, y, windowWidth - 24f, 24f ), $"DPI {Math.Round( _detectedDpi, MidpointRounding.AwayFromZero ):0}   缩放 {Math.Round( _displayScale * 100f, MidpointRounding.AwayFromZero ):0}%   右下角拖拽调整宽高" );
+      GUI.Label(
+         new Rect( 12f, y, windowWidth - 24f, 24f ),
+         TranslateTemplate(
+         "DPI {0}   Scale {1}%   Drag the bottom-right corner to resize",
+         "StatusWindow.DisplayInfo",
+         Math.Round( _detectedDpi, MidpointRounding.AwayFromZero ).ToString( "0", CultureInfo.InvariantCulture ),
+         Math.Round( _displayScale * 100f, MidpointRounding.AwayFromZero ).ToString( "0", CultureInfo.InvariantCulture ) ) );
       y += 28f;
 
       if( !string.IsNullOrWhiteSpace( snapshot.GameVersionReminder ) )
@@ -88,24 +94,24 @@ internal sealed class TranslationStatusWindow
       GUI.Box( new Rect( 8f, y, windowWidth - 16f, windowHeight - y - 32f ), string.Empty );
       y += 12f;
 
-      DrawRow( ref y, "插件状态", snapshot.PluginStatus, windowWidth );
-      DrawRow( ref y, "当前游戏版本", snapshot.CurrentGameVersion, windowWidth );
-      DrawRow( ref y, "已记录版本", snapshot.RecordedGameVersion, windowWidth );
-      DrawRow( ref y, "版本检查", snapshot.GameVersionStatus, windowWidth );
-      DrawRow( ref y, "目标语言", snapshot.TargetLanguage, windowWidth );
-      DrawRow( ref y, "数据库状态", snapshot.DatabaseStatus, windowWidth );
-      DrawRow( ref y, "已加载条目", snapshot.LoadedEntryCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
-      DrawRow( ref y, "运行时查找", snapshot.LookupCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
-      DrawRow( ref y, "词库命中", snapshot.DatabaseHitCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
-      DrawRow( ref y, "native_mod 直忽略", snapshot.NativeModIgnoredCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
-      DrawRow( ref y, "唯一 native_mod 忽略", snapshot.UniqueNativeModIgnoredCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
-      DrawRow( ref y, "命中率", ( snapshot.HitRate * 100d ).ToString( "0.0", CultureInfo.InvariantCulture ) + "%", windowWidth );
-      DrawRow( ref y, "实际替换", snapshot.ReplacementCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
-      DrawRow( ref y, "唯一已替换", snapshot.UniqueReplacementCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
-      DrawRow( ref y, "未命中", snapshot.MissCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
-      DrawRow( ref y, "唯一未命中", snapshot.UniqueMissCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
-      DrawRow( ref y, "已写入 runtime_source", snapshot.CapturedMissCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
-      DrawRow( ref y, "错误次数", snapshot.ErrorCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
+      DrawRow( ref y, "Plugin Status", snapshot.PluginStatus, windowWidth );
+      DrawRow( ref y, "Current Game Version", snapshot.CurrentGameVersion, windowWidth );
+      DrawRow( ref y, "Recorded Game Version", snapshot.RecordedGameVersion, windowWidth );
+      DrawRow( ref y, "Version Check", snapshot.GameVersionStatus, windowWidth );
+      DrawRow( ref y, "Target Language", snapshot.TargetLanguage, windowWidth );
+      DrawRow( ref y, "Database Status", snapshot.DatabaseStatus, windowWidth );
+      DrawRow( ref y, "Loaded Entries", snapshot.LoadedEntryCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
+      DrawRow( ref y, "Runtime Lookups", snapshot.LookupCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
+      DrawRow( ref y, "Database Hits", snapshot.DatabaseHitCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
+      DrawRow( ref y, "native_mod Direct Ignores", snapshot.NativeModIgnoredCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
+      DrawRow( ref y, "Unique native_mod Ignores", snapshot.UniqueNativeModIgnoredCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
+      DrawRow( ref y, "Hit Rate", ( snapshot.HitRate * 100d ).ToString( "0.0", CultureInfo.InvariantCulture ) + "%", windowWidth );
+      DrawRow( ref y, "Actual Replacements", snapshot.ReplacementCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
+      DrawRow( ref y, "Unique Replacements", snapshot.UniqueReplacementCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
+      DrawRow( ref y, "Misses", snapshot.MissCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
+      DrawRow( ref y, "Unique Misses", snapshot.UniqueMissCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
+      DrawRow( ref y, "Captured to runtime_source", snapshot.CapturedMissCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
+      DrawRow( ref y, "Error Count", snapshot.ErrorCount.ToString( CultureInfo.InvariantCulture ), windowWidth );
 
       var resizeHandleRect = GetResizeHandleRect( windowWidth, windowHeight );
       GUI.Box( resizeHandleRect, "↘" );
@@ -120,9 +126,20 @@ internal sealed class TranslationStatusWindow
       var labelWidth = Math.Max( 138f, Math.Min( 220f, windowWidth * 0.32f ) );
       var valueLeft = labelLeft + labelWidth + 14f;
       var valueWidth = Math.Max( 160f, windowWidth - valueLeft - 18f );
-      GUI.Label( new Rect( labelLeft, y, labelWidth, 26f ), label );
+      GUI.Label( new Rect( labelLeft, y, labelWidth, 26f ), TranslateLiteral( label, "StatusWindow.Row." + label.Replace( ' ', '_' ) ) );
       GUI.Label( new Rect( valueLeft, y, valueWidth, 26f ), value ?? string.Empty );
       y += 26f;
+   }
+
+   private static string TranslateLiteral( string value, string hookName )
+   {
+      return OstranautsTranslatorPlugin.Translate( value, hookName );
+   }
+
+   private static string TranslateTemplate( string sourceTemplate, string hookName, params object[] arguments )
+   {
+      var translatedTemplate = TranslateLiteral( sourceTemplate, hookName + ".template" );
+      return string.Format( CultureInfo.InvariantCulture, translatedTemplate, arguments );
    }
 
    private void ApplyDisplayScale( DisplayScaleInfo displayScaleInfo )

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using System.Text.RegularExpressions;
 using BepInEx;
 using HarmonyLib;
@@ -26,6 +27,7 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
    private const int SceneWarmupScanFrames = 12;
    private static readonly IReadOnlyDictionary<string, string> ExactRuntimeTextMap = new Dictionary<string, string>( StringComparer.Ordinal )
    {
+      [ "Compartment" ] = "舱室",
       [ "Shift" ] = "轮次",
       [ "Shift:" ] = "轮次：",
       [ "班次" ] = "轮次",
@@ -51,6 +53,7 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
    private readonly ConcurrentDictionary<string, CachedTranslationResult> _translationResultCache = new ConcurrentDictionary<string, CachedTranslationResult>( StringComparer.Ordinal );
    private readonly ConcurrentDictionary<string, byte> _missingProjectionCache = new ConcurrentDictionary<string, byte>( StringComparer.Ordinal );
    private IReadOnlyDictionary<string, string> _bootstrapFixedTranslations = new Dictionary<string, string>( StringComparer.Ordinal );
+   private IReadOnlyList<KeyValuePair<string, string>> _embeddedBootstrapFixedTranslations = Array.Empty<KeyValuePair<string, string>>();
    private TranslationStatusWindow _statusWindow;
    private bool _inputSupported = true;
    private bool _inputLoopLogged;
@@ -207,6 +210,19 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
       Instance?.Logger.LogInfo( "[MenuDiag] " + message );
    }
 
+   internal static bool IsLoadingScreenActive()
+   {
+      try
+      {
+         var loadingScreenType = Type.GetType( "Ostranauts.LoadingScreen, Assembly-CSharp", false );
+         return loadingScreenType != null && Resources.FindObjectsOfTypeAll( loadingScreenType ).Length > 0;
+      }
+      catch
+      {
+         return false;
+      }
+   }
+
    private void ReloadCatalog()
    {
       _translationResultCache.Clear();
@@ -215,6 +231,8 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
       if( !PluginSettings.Enabled.Value )
       {
          _catalog = RuntimeTranslationCatalog.Empty;
+         _bootstrapFixedTranslations = new Dictionary<string, string>( StringComparer.Ordinal );
+         _embeddedBootstrapFixedTranslations = Array.Empty<KeyValuePair<string, string>>();
          Logger.LogInfo( "OstranautsTranslator is disabled through configuration." );
          return;
       }
@@ -222,6 +240,7 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
       var databasePath = ResolveDatabasePath();
       _runtimeMissCollector.Initialize( databasePath );
       _bootstrapFixedTranslations = LoadBootstrapFixedTranslations( databasePath, PluginSettings.Language.Value );
+      _embeddedBootstrapFixedTranslations = BuildEmbeddedBootstrapTranslationCandidates( _bootstrapFixedTranslations );
 
       if( !File.Exists( databasePath ) )
       {
@@ -323,6 +342,12 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
    {
       try
       {
+         if( value.StartsWith( "ZOOM RANGE: ", StringComparison.Ordinal ) )
+         {
+            CacheTranslationResult( value, value, CachedTranslationKind.VolatileBypass );
+            return value;
+         }
+
          if( ExactRuntimeTextMap.TryGetValue( value, out var exactRuntimeText ) )
          {
             var normalizedExactRuntimeText = NormalizePartiallyLocalizedText( exactRuntimeText );
@@ -369,6 +394,13 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
             }
 
             return normalizedCachedResult;
+         }
+
+         if( TryTranslateEmbeddedBootstrapText( value, out var embeddedBootstrapTranslated ) )
+         {
+            var normalizedEmbeddedBootstrapTranslated = NormalizePartiallyLocalizedText( embeddedBootstrapTranslated );
+            CacheTranslationResult( value, normalizedEmbeddedBootstrapTranslated, CachedTranslationKind.BootstrapFixed );
+            return normalizedEmbeddedBootstrapTranslated;
          }
 
           var projection = RuntimeTextProjector.CreateProjection( value, _catalog.Configuration );
@@ -438,6 +470,50 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
       return value;
    }
 
+   private bool TryTranslateEmbeddedBootstrapText( string value, out string translatedValue )
+   {
+      translatedValue = value;
+
+      if( string.IsNullOrWhiteSpace( value )
+         || !ContainsCjkCharacters( value )
+         || !ContainsAsciiLetters( value )
+         || _embeddedBootstrapFixedTranslations.Count == 0 )
+      {
+         return false;
+      }
+
+      var translated = value;
+      var changed = false;
+      foreach( var entry in _embeddedBootstrapFixedTranslations )
+      {
+         var sourceText = entry.Key;
+         var replacementText = entry.Value;
+         if( translated.IndexOf( sourceText, StringComparison.Ordinal ) < 0 ) continue;
+
+         translated = ReplaceEmbeddedBootstrapText( translated, sourceText, replacementText );
+         changed = true;
+      }
+
+      translatedValue = translated;
+      return changed;
+   }
+
+   private static IReadOnlyList<KeyValuePair<string, string>> BuildEmbeddedBootstrapTranslationCandidates( IReadOnlyDictionary<string, string> translations )
+   {
+      if( translations == null || translations.Count == 0 ) return Array.Empty<KeyValuePair<string, string>>();
+
+      var candidates = new List<KeyValuePair<string, string>>( translations.Count );
+      foreach( var entry in translations )
+      {
+         if( ShouldReplaceEmbeddedBootstrapText( entry.Key, entry.Value ) )
+         {
+            candidates.Add( entry );
+         }
+      }
+
+      return candidates;
+   }
+
    private void CacheTranslationResult( string sourceText, string translatedText, CachedTranslationKind kind )
    {
       if( string.IsNullOrEmpty( sourceText ) ) return;
@@ -481,6 +557,131 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
       normalized = LeadingYouMixedClauseRegex.Replace( normalized, match => match.Groups[ 1 ].Value + "你" );
       normalized = LeadingYouBeforeCjkRegex.Replace( normalized, match => match.Groups[ 1 ].Value + "你" );
       return LeadingYouRegex.Replace( normalized, match => match.Groups[ 1 ].Value + "你" );
+   }
+
+   private static bool ShouldReplaceEmbeddedBootstrapText( string sourceText, string replacementText )
+   {
+      if( string.IsNullOrWhiteSpace( sourceText ) || string.IsNullOrWhiteSpace( replacementText ) ) return false;
+      if( sourceText.Length < 4 ) return false;
+      if( ContainsCjkCharacters( sourceText ) ) return false;
+      if( !ContainsAsciiLetters( sourceText ) ) return false;
+
+      var hasLowercase = false;
+      for( var i = 0; i < sourceText.Length; i++ )
+      {
+         if( char.IsLower( sourceText[ i ] ) )
+         {
+            hasLowercase = true;
+            break;
+         }
+      }
+
+      if( hasLowercase ) return true;
+      if( sourceText.IndexOf( ' ' ) >= 0 ) return true;
+
+      return sourceText.IndexOfAny( new[] { '.', ':', '!', '?', '-', '&', '(', ')', '/' } ) >= 0;
+   }
+
+   private static string ReplaceOrdinal( string value, string oldValue, string newValue )
+   {
+      if( string.IsNullOrEmpty( value ) || string.IsNullOrEmpty( oldValue ) ) return value;
+
+      var index = value.IndexOf( oldValue, StringComparison.Ordinal );
+      if( index < 0 ) return value;
+
+      var builder = new StringBuilder( value.Length );
+      var cursor = 0;
+      while( index >= 0 )
+      {
+         builder.Append( value, cursor, index - cursor );
+         builder.Append( newValue );
+         cursor = index + oldValue.Length;
+         index = value.IndexOf( oldValue, cursor, StringComparison.Ordinal );
+      }
+
+      builder.Append( value, cursor, value.Length - cursor );
+      return builder.ToString();
+   }
+
+   private static string ReplaceEmbeddedBootstrapText( string value, string sourceText, string replacementText )
+   {
+      if( string.IsNullOrEmpty( value ) || string.IsNullOrEmpty( sourceText ) ) return value;
+
+      return IsAsciiWordCandidate( sourceText )
+         ? ReplaceAsciiWordOrdinal( value, sourceText, replacementText )
+         : ReplaceOrdinal( value, sourceText, replacementText );
+   }
+
+   private static string ReplaceAsciiWordOrdinal( string value, string oldValue, string newValue )
+   {
+      var index = value.IndexOf( oldValue, StringComparison.Ordinal );
+      if( index < 0 ) return value;
+
+      var builder = new StringBuilder( value.Length );
+      var cursor = 0;
+      while( index >= 0 )
+      {
+         if( IsWholeAsciiWordMatch( value, index, oldValue.Length ) )
+         {
+            builder.Append( value, cursor, index - cursor );
+            builder.Append( newValue );
+            cursor = index + oldValue.Length;
+         }
+
+         index = value.IndexOf( oldValue, index + oldValue.Length, StringComparison.Ordinal );
+      }
+
+      builder.Append( value, cursor, value.Length - cursor );
+      return builder.ToString();
+   }
+
+   private static bool IsAsciiWordCandidate( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return false;
+
+      for( var i = 0; i < value.Length; i++ )
+      {
+         var current = value[ i ];
+         if( current is >= 'A' and <= 'Z' || current is >= 'a' and <= 'z' || current is >= '0' and <= '9' )
+         {
+            continue;
+         }
+
+         return false;
+      }
+
+      return true;
+   }
+
+   private static bool IsWholeAsciiWordMatch( string value, int index, int length )
+   {
+      var startIsBoundary = index == 0 || !IsAsciiWordCharacter( value[ index - 1 ] );
+      var endIndex = index + length;
+      var endIsBoundary = endIndex >= value.Length || !IsAsciiWordCharacter( value[ endIndex ] );
+      return startIsBoundary && endIsBoundary;
+   }
+
+   private static bool IsAsciiWordCharacter( char value )
+   {
+      return value is >= 'A' and <= 'Z'
+         || value is >= 'a' and <= 'z'
+         || value is >= '0' and <= '9';
+   }
+
+   private static bool ContainsAsciiLetters( string value )
+   {
+      if( string.IsNullOrEmpty( value ) ) return false;
+
+      for( var i = 0; i < value.Length; i++ )
+      {
+         var current = value[ i ];
+         if( current is >= 'A' and <= 'Z' || current is >= 'a' and <= 'z' )
+         {
+            return true;
+         }
+      }
+
+      return false;
    }
 
    private static bool ContainsCjkCharacters( string value )
