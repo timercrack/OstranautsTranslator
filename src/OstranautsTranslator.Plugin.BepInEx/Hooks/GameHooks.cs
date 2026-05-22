@@ -1851,6 +1851,8 @@ internal static class LogMessageRuntimeTranslationHelper
    private static readonly Regex CancelsCurrentActionRegex = new Regex( @"^(?<subject>.+?) cancels (?<owner>.+?) current action\.$", RegexOptions.Compiled | RegexOptions.CultureInvariant );
    private static readonly Regex MixedYourCurrentActionRegex = new Regex( @"\byour(?=\s+当前动作\b)", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant );
    private static readonly Regex StartsOpeningTargetRegex = new Regex( @"(?<action>开始(?:撬)?开|开始打开)\s*(?<target>(?:the\s+)?[A-Za-z][A-Za-z0-9'\- ]+?)(?<punct>[。.!?])", RegexOptions.Compiled | RegexOptions.CultureInvariant );
+   private static readonly Regex RelationshipNowConsidersRegex = new Regex( @"^(?<subject>.+?) now considers (?<target>.+?) a\(n\) (?<relation>.+?)!$", RegexOptions.Compiled | RegexOptions.CultureInvariant );
+   private static readonly Regex RelationshipNoLongerConsidersRegex = new Regex( @"^(?<subject>.+?) no longer considers (?<target>.+?) a\(n\) (?<relation>.+?)!$", RegexOptions.Compiled | RegexOptions.CultureInvariant );
    private static readonly IReadOnlyDictionary<string, string> MixedGrammarTokenMap = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase )
    {
       [ "you" ] = "你",
@@ -1923,6 +1925,20 @@ internal static class LogMessageRuntimeTranslationHelper
          + "取消了"
          + TranslateOwnershipToken( match.Groups[ "owner" ].Value )
          + "当前动作。" );
+      normalized = RelationshipNowConsidersRegex.Replace( normalized, match =>
+         TranslateLogToken( match.Groups[ "subject" ].Value, "CondOwner.LogMessage.relationship.subject" )
+         + " 现在将 "
+         + TranslateLogToken( match.Groups[ "target" ].Value, "CondOwner.LogMessage.relationship.target" )
+         + " 视为“"
+         + TranslateLogToken( match.Groups[ "relation" ].Value, "CondOwner.LogMessage.relationship.kind" )
+         + "”！" );
+      normalized = RelationshipNoLongerConsidersRegex.Replace( normalized, match =>
+         TranslateLogToken( match.Groups[ "subject" ].Value, "CondOwner.LogMessage.relationship.remove.subject" )
+         + " 不再将 "
+         + TranslateLogToken( match.Groups[ "target" ].Value, "CondOwner.LogMessage.relationship.remove.target" )
+         + " 视为“"
+         + TranslateLogToken( match.Groups[ "relation" ].Value, "CondOwner.LogMessage.relationship.remove.kind" )
+         + "”！" );
       normalized = MixedYourCurrentActionRegex.Replace( normalized, "你的" );
       normalized = StartsOpeningTargetRegex.Replace( normalized, match =>
          match.Groups[ "action" ].Value
@@ -4105,7 +4121,7 @@ internal static class Ship_LogAdd_Hook
 
    private static void Prefix( ref string strEntry )
    {
-      strEntry = OstranautsTranslatorPlugin.Translate( strEntry, "Ship.LogAdd" );
+      strEntry = LogMessageRuntimeTranslationHelper.TranslateLogMarkup( strEntry, "Ship.LogAdd" );
    }
 }
 
@@ -7901,15 +7917,21 @@ internal static class ChargenCareerRuntimeTranslationHelper
          return PluginSettings.DisableChargenTimeCost?.Value == true;
       }
 
-      public static bool ShouldBypassChargenAgeIncrease( object condOwner )
+      public static bool IsInChargen( object condOwner )
       {
-         if( !IsEnabled() ) return false;
          if( condOwner == null ) return false;
 
          var hasCondMethod = condOwner.GetType().GetMethod( "HasCond", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof( string ) }, null );
          if( hasCondMethod == null ) return false;
 
          return hasCondMethod.Invoke( condOwner, new object[] { "IsInChargen" } ) is bool isInChargen && isInChargen;
+      }
+
+      public static bool ShouldBypassChargenAgeIncrease( object condOwner )
+      {
+         if( !IsEnabled() ) return false;
+
+         return IsInChargen( condOwner );
       }
 
       public static bool ShouldBypassChargenTraitYears( object guiChargenCareer )
@@ -7921,6 +7943,606 @@ internal static class ChargenCareerRuntimeTranslationHelper
          return ShouldBypassChargenAgeIncrease( coUser );
       }
    }
+
+internal static class ChargenRiskOutcomeHelper
+{
+   private static readonly ConditionalWeakTable<object, RenderedRiskSelectionState> RenderedSelections = new ConditionalWeakTable<object, RenderedRiskSelectionState>();
+
+   [ThreadStatic]
+   private static PageEventContext CurrentContext;
+
+   [ThreadStatic]
+   private static ForcedOutcomeContext PendingForcedOutcome;
+
+   private sealed class PageEventContext
+   {
+      public object CoUser;
+      public string EventName;
+      public string EventTitle;
+      public HashSet<string> AllowedInteractionNames;
+      public HashSet<string> BlockedInteractionNames;
+   }
+
+   private sealed class RenderedRiskSelectionState
+   {
+      public object CoUser;
+      public string EventName;
+      public Dictionary<string, SelectedOutcome> BestOutcomeByTitle;
+   }
+
+   private sealed class SelectedOutcome
+   {
+      public string InteractionName;
+      public string LifeEventName;
+   }
+
+   private sealed class ForcedOutcomeContext
+   {
+      public object CoUser;
+      public string EventName;
+      public string InteractionName;
+      public string LifeEventName;
+   }
+
+   private sealed class OutcomeCandidate
+   {
+      public string InteractionName;
+      public string LifeEventName;
+      public object Interaction;
+      public object LifeEvent;
+      public float Score;
+      public double? RawInteractionScore;
+      public double RewardScore;
+      public bool UsedFallbackScore;
+   }
+
+   public static void BeginPageEvent( object guiChargenCareer, object jsonLifeEvent )
+   {
+      EndPageEvent();
+      ClearRenderedSelection( guiChargenCareer );
+
+      if( PluginSettings.ForceBestChargenAdventureOutcome?.Value != true ) return;
+      if( guiChargenCareer == null || jsonLifeEvent == null ) return;
+      if( !IsAdventureEventPage( guiChargenCareer ) ) return;
+
+      var coUser = RuntimeHookTranslationHelper.GetInstanceField( guiChargenCareer.GetType(), "coUser" )?.GetValue( guiChargenCareer );
+      if( !ChargenTimeBypassHelper.IsInChargen( coUser ) ) return;
+
+      var interaction = ResolveInteractionFromLifeEvent( jsonLifeEvent );
+      var eventName = GetStringMember( interaction, "strName" );
+      var eventTitle = GetStringMember( interaction, "strTitle" );
+      var inverseNames = GetStringArrayMember( interaction, "aInverse" );
+      if( inverseNames == null || inverseNames.Length < 2 ) return;
+
+      LogDiagnostic( $"Begin event={eventName} title={eventTitle} inverseCount={inverseNames.Length}" );
+
+      var groupedCandidates = new Dictionary<string, List<OutcomeCandidate>>( StringComparer.Ordinal );
+      foreach( var inverseName in inverseNames )
+      {
+         if( string.IsNullOrWhiteSpace( inverseName ) ) continue;
+
+         var inverseLifeEvent = ResolveLifeEvent( inverseName );
+         var inverseInteraction = ResolveInteractionFromLifeEvent( inverseLifeEvent );
+         var title = GetStringMember( inverseInteraction, "strTitle" );
+         var interactionName = GetStringMember( inverseInteraction, "strName" );
+         if( string.IsNullOrWhiteSpace( title ) || string.IsNullOrWhiteSpace( interactionName ) ) continue;
+         if( !IsRiskTitle( title ) ) continue;
+
+         if( !groupedCandidates.TryGetValue( title, out var candidates ) )
+         {
+            candidates = new List<OutcomeCandidate>();
+            groupedCandidates[ title ] = candidates;
+         }
+
+         candidates.Add( new OutcomeCandidate
+         {
+            InteractionName = interactionName,
+            LifeEventName = GetStringMember( inverseLifeEvent, "strName" ),
+            Interaction = inverseInteraction,
+            LifeEvent = inverseLifeEvent,
+         } );
+      }
+
+      if( groupedCandidates.Count == 0 )
+      {
+         LogDiagnostic( $"No risk groups event={eventName} title={eventTitle}" );
+      }
+
+      var allowedInteractionNames = new HashSet<string>( StringComparer.Ordinal );
+      var blockedInteractionNames = new HashSet<string>( StringComparer.Ordinal );
+      var bestOutcomeByTitle = new Dictionary<string, SelectedOutcome>( StringComparer.Ordinal );
+      foreach( var group in groupedCandidates )
+      {
+         var riskTitle = group.Key;
+         var candidates = group.Value;
+         if( candidates.Count < 2 ) continue;
+
+         var bestCandidate = SelectBestCandidate( coUser, candidates );
+         if( bestCandidate == null ) continue;
+
+         bestOutcomeByTitle[ riskTitle ] = new SelectedOutcome
+         {
+            InteractionName = bestCandidate.InteractionName,
+            LifeEventName = bestCandidate.LifeEventName,
+         };
+
+         foreach( var candidate in candidates )
+         {
+            LogDiagnostic( $"Candidate event={eventName} riskTitle={GetStringMember( candidate.Interaction, "strTitle" )} interaction={candidate.InteractionName} lifeEvent={candidate.LifeEventName} rawScore={FormatNullableScore( candidate.RawInteractionScore )} fallback={candidate.UsedFallbackScore} score={candidate.Score:0.###} reward={candidate.RewardScore:0.###} detail={BuildOutcomeDetailSummary( candidate.Interaction, candidate.LifeEvent )}" );
+         }
+
+         LogDiagnostic( $"Selected event={eventName} riskTitle={GetStringMember( bestCandidate.Interaction, "strTitle" )} interaction={bestCandidate.InteractionName} lifeEvent={bestCandidate.LifeEventName} rawScore={FormatNullableScore( bestCandidate.RawInteractionScore )} fallback={bestCandidate.UsedFallbackScore} score={bestCandidate.Score:0.###} reward={bestCandidate.RewardScore:0.###}" );
+
+         allowedInteractionNames.Add( bestCandidate.InteractionName );
+         foreach( var candidate in candidates )
+         {
+            if( string.Equals( candidate.InteractionName, bestCandidate.InteractionName, StringComparison.Ordinal ) ) continue;
+            blockedInteractionNames.Add( candidate.InteractionName );
+         }
+      }
+
+      if( allowedInteractionNames.Count == 0 && blockedInteractionNames.Count == 0 ) return;
+
+      CurrentContext = new PageEventContext
+      {
+         CoUser = coUser,
+         EventName = eventName,
+         EventTitle = eventTitle,
+         AllowedInteractionNames = allowedInteractionNames,
+         BlockedInteractionNames = blockedInteractionNames,
+      };
+
+      if( bestOutcomeByTitle.Count > 0 )
+      {
+         RenderedSelections.Add( guiChargenCareer, new RenderedRiskSelectionState
+         {
+            CoUser = coUser,
+            EventName = eventName,
+            BestOutcomeByTitle = bestOutcomeByTitle,
+         } );
+      }
+
+      LogDiagnostic( $"Armed event={eventName} allowed=[{string.Join( ",", allowedInteractionNames )}] blocked=[{string.Join( ",", blockedInteractionNames )}]" );
+   }
+
+   public static void PrepareClickedOutcome( object guiChargenCareer, ref object jsonLifeEvent )
+   {
+      if( PluginSettings.ForceBestChargenAdventureOutcome?.Value != true ) return;
+      if( guiChargenCareer == null || jsonLifeEvent == null ) return;
+      if( !RenderedSelections.TryGetValue( guiChargenCareer, out var renderedSelection ) ) return;
+
+      var clickedInteraction = ResolveInteractionFromLifeEvent( jsonLifeEvent );
+      var riskTitle = GetStringMember( clickedInteraction, "strTitle" );
+      if( !IsRiskTitle( riskTitle ) ) return;
+      if( !renderedSelection.BestOutcomeByTitle.TryGetValue( riskTitle, out var bestOutcome ) ) return;
+
+      var clickedLifeEventName = GetStringMember( jsonLifeEvent, "strName" );
+      if( !string.IsNullOrWhiteSpace( bestOutcome.LifeEventName )
+         && !string.Equals( clickedLifeEventName, bestOutcome.LifeEventName, StringComparison.Ordinal ) )
+      {
+         var redirectedLifeEvent = ResolveLifeEvent( bestOutcome.LifeEventName );
+         if( redirectedLifeEvent != null )
+         {
+            LogDiagnostic( $"Click redirect event={renderedSelection.EventName} riskTitle={riskTitle} from={clickedLifeEventName} to={bestOutcome.LifeEventName}" );
+            jsonLifeEvent = redirectedLifeEvent;
+         }
+      }
+
+      if( string.IsNullOrWhiteSpace( bestOutcome.InteractionName ) ) return;
+
+      PendingForcedOutcome = new ForcedOutcomeContext
+      {
+         CoUser = renderedSelection.CoUser,
+         EventName = renderedSelection.EventName,
+         InteractionName = bestOutcome.InteractionName,
+         LifeEventName = bestOutcome.LifeEventName,
+      };
+
+      LogDiagnostic( $"Click arm event={renderedSelection.EventName} riskTitle={riskTitle} interaction={bestOutcome.InteractionName} lifeEvent={bestOutcome.LifeEventName}" );
+   }
+
+   public static void EndPageEvent()
+   {
+      if( CurrentContext != null )
+      {
+         LogDiagnostic( $"End event={CurrentContext.EventName} title={CurrentContext.EventTitle}" );
+      }
+
+      CurrentContext = null;
+   }
+
+   public static bool TryOverrideTriggered( object interaction, object objUs, object objThem, ref bool result )
+   {
+      if( interaction == null ) return false;
+
+      var interactionName = GetStringMember( interaction, "strName" );
+      if( string.IsNullOrWhiteSpace( interactionName ) ) return false;
+
+      var forcedOutcome = PendingForcedOutcome;
+      if( forcedOutcome != null
+         && ReferenceEquals( objUs, forcedOutcome.CoUser )
+         && ReferenceEquals( objThem, forcedOutcome.CoUser )
+         && string.Equals( interactionName, forcedOutcome.InteractionName, StringComparison.Ordinal ) )
+      {
+         PendingForcedOutcome = null;
+         LogDiagnostic( $"Triggered FORCE event={forcedOutcome.EventName} interaction={interactionName} lifeEvent={forcedOutcome.LifeEventName}" );
+         result = true;
+         return true;
+      }
+
+      var context = CurrentContext;
+      if( context == null ) return false;
+      if( !ReferenceEquals( objUs, context.CoUser ) || !ReferenceEquals( objThem, context.CoUser ) ) return false;
+
+      if( context.BlockedInteractionNames.Contains( interactionName ) )
+      {
+         LogDiagnostic( $"Triggered BLOCK event={context.EventName} interaction={interactionName}" );
+         result = false;
+         return true;
+      }
+
+      if( context.AllowedInteractionNames.Contains( interactionName ) )
+      {
+         LogDiagnostic( $"Triggered ALLOW event={context.EventName} interaction={interactionName}" );
+         result = true;
+         return true;
+      }
+
+      return false;
+   }
+
+   private static bool IsAdventureEventPage( object guiChargenCareer )
+   {
+      var cgs = RuntimeHookTranslationHelper.GetInstanceField( guiChargenCareer.GetType(), "cgs" )?.GetValue( guiChargenCareer );
+      if( cgs == null ) return false;
+
+      var latestCareer = cgs.GetType().GetMethod( "GetLatestCareer", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null )?.Invoke( cgs, Array.Empty<object>() );
+      var careerId = GetStringMember( latestCareer, "strJC" );
+      if( string.IsNullOrWhiteSpace( careerId ) ) return false;
+
+      if( RuntimeHookTranslationHelper.GetInstanceField( guiChargenCareer.GetType(), "dictPropMap" )?.GetValue( guiChargenCareer ) is not IDictionary dictPropMap ) return false;
+      if( !dictPropMap.Contains( careerId + "Type" ) ) return false;
+
+      return string.Equals( dictPropMap[ careerId + "Type" ] as string, "Event", StringComparison.Ordinal );
+   }
+
+   private static OutcomeCandidate SelectBestCandidate( object coUser, List<OutcomeCandidate> candidates )
+   {
+      OutcomeCandidate bestCandidate = null;
+
+      foreach( var candidate in candidates )
+      {
+         candidate.Score = EvaluateInteractionScore( coUser, candidate.Interaction, candidate.LifeEvent, out var rawInteractionScore, out var usedFallbackScore );
+         candidate.RawInteractionScore = rawInteractionScore;
+         candidate.UsedFallbackScore = usedFallbackScore;
+         candidate.RewardScore = EvaluateRewardScore( candidate.Interaction, candidate.LifeEvent );
+
+         if( bestCandidate == null
+            || candidate.Score < bestCandidate.Score
+            || ( Math.Abs( candidate.Score - bestCandidate.Score ) < 0.001f && candidate.RewardScore > bestCandidate.RewardScore )
+            || ( Math.Abs( candidate.Score - bestCandidate.Score ) < 0.001f
+               && Math.Abs( candidate.RewardScore - bestCandidate.RewardScore ) < 0.001
+               && string.Compare( candidate.InteractionName, bestCandidate.InteractionName, StringComparison.Ordinal ) < 0 ) )
+         {
+            bestCandidate = candidate;
+         }
+      }
+
+      return bestCandidate;
+   }
+
+   private static float EvaluateInteractionScore( object coUser, object interaction, object lifeEvent, out double? rawInteractionScore, out bool usedFallbackScore )
+   {
+      rawInteractionScore = null;
+      usedFallbackScore = false;
+
+      if( coUser != null && interaction != null )
+      {
+         var method = coUser.GetType().GetMethod( "GetNetInteractionResult", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { interaction.GetType(), typeof( bool ) }, null );
+         if( method != null )
+         {
+            var raw = method.Invoke( coUser, new object[] { interaction, false } );
+            if( raw is float score )
+            {
+               rawInteractionScore = score;
+               if( Math.Abs( score ) > 0.001f ) return score;
+            }
+
+            if( raw is double doubleScore )
+            {
+               rawInteractionScore = doubleScore;
+               if( Math.Abs( doubleScore ) > 0.001 ) return (float)doubleScore;
+            }
+         }
+      }
+
+      usedFallbackScore = true;
+      return (float)-EvaluateRewardScore( interaction, lifeEvent );
+   }
+
+   private static double EvaluateRewardScore( object interaction, object lifeEvent )
+   {
+      var rewardScore = 0.0;
+      rewardScore += Math.Max( GetDoubleMember( lifeEvent, "fCashRewardMin" ), GetDoubleMember( lifeEvent, "fCashRewardMax" ) );
+
+      if( !string.IsNullOrWhiteSpace( GetStringMember( lifeEvent, "strShipRewards" ) ) )
+      {
+         rewardScore += 1_000_000.0;
+         rewardScore += GetBoolMember( lifeEvent, "bShipOwned" ) ? 100_000.0 : 0.0;
+         rewardScore -= GetDoubleMember( lifeEvent, "fShipMortgage" );
+         rewardScore -= GetDoubleMember( lifeEvent, "fShipDmgMax" ) * 100_000.0;
+      }
+
+      foreach( var inverseName in GetStringArrayMember( interaction, "aInverse" ) )
+      {
+         if( string.IsNullOrWhiteSpace( inverseName ) ) continue;
+
+         if( inverseName.IndexOf( "Imprisoned", StringComparison.OrdinalIgnoreCase ) >= 0
+            || inverseName.IndexOf( "Brig", StringComparison.OrdinalIgnoreCase ) >= 0 )
+         {
+            rewardScore -= 1_000_000.0;
+         }
+      }
+
+      foreach( var lootItem in GetStringArrayMember( interaction, "aLootItms" ) )
+      {
+         if( string.IsNullOrWhiteSpace( lootItem ) ) continue;
+
+         if( lootItem.StartsWith( "addus,", StringComparison.OrdinalIgnoreCase ) )
+         {
+            rewardScore += 10_000.0;
+         }
+      }
+
+      var interactionName = GetStringMember( interaction, "strName" );
+      if( interactionName.IndexOf( "Success", StringComparison.OrdinalIgnoreCase ) >= 0 ) rewardScore += 100_000.0;
+      if( interactionName.IndexOf( "Fail", StringComparison.OrdinalIgnoreCase ) >= 0 ) rewardScore -= 100_000.0;
+
+      return rewardScore;
+   }
+
+   private static string BuildOutcomeDetailSummary( object interaction, object lifeEvent )
+   {
+      var parts = new List<string>();
+
+      var lifeEventName = GetStringMember( lifeEvent, "strName" );
+      if( !string.IsNullOrWhiteSpace( lifeEventName ) )
+      {
+         parts.Add( $"lifeEvent={lifeEventName}" );
+      }
+
+      var cashMin = GetDoubleMember( lifeEvent, "fCashRewardMin" );
+      var cashMax = GetDoubleMember( lifeEvent, "fCashRewardMax" );
+      if( Math.Abs( cashMin ) > 0.001 || Math.Abs( cashMax ) > 0.001 )
+      {
+         parts.Add( $"cash={cashMin:0.##}/{cashMax:0.##}" );
+      }
+
+      var shipRewards = GetStringMember( lifeEvent, "strShipRewards" );
+      if( !string.IsNullOrWhiteSpace( shipRewards ) )
+      {
+         parts.Add( $"ship={shipRewards}" );
+      }
+
+      var inverseNames = GetStringArrayMember( interaction, "aInverse" );
+      if( inverseNames.Length > 0 )
+      {
+         parts.Add( $"inverse=[{string.Join( ",", inverseNames )}]" );
+      }
+
+      var lootItems = GetStringArrayMember( interaction, "aLootItms" );
+      if( lootItems.Length > 0 )
+      {
+         parts.Add( $"loot=[{string.Join( ",", lootItems )}]" );
+      }
+
+      return parts.Count == 0 ? "none" : string.Join( "; ", parts );
+   }
+
+   private static bool IsRiskTitle( string title )
+   {
+      if( string.IsNullOrWhiteSpace( title ) ) return false;
+
+      var trimmed = title.TrimStart();
+      return trimmed.StartsWith( "RISK:", StringComparison.OrdinalIgnoreCase )
+         || trimmed.StartsWith( "RISK：", StringComparison.OrdinalIgnoreCase )
+         || trimmed.StartsWith( "风险:", StringComparison.Ordinal )
+         || trimmed.StartsWith( "风险：", StringComparison.Ordinal );
+   }
+
+   private static void ClearRenderedSelection( object guiChargenCareer )
+   {
+      if( guiChargenCareer == null ) return;
+
+      RenderedSelections.Remove( guiChargenCareer );
+   }
+
+   private static string FormatNullableScore( double? value )
+   {
+      return value.HasValue ? value.Value.ToString( "0.###" ) : "null";
+   }
+
+   private static void LogDiagnostic( string message )
+   {
+      if( string.IsNullOrWhiteSpace( message ) ) return;
+
+      OstranautsTranslatorPlugin.LogDiagnostic( "[ChargenRisk] " + message );
+   }
+
+   private static object ResolveLifeEvent( string lifeEventName )
+   {
+      if( string.IsNullOrWhiteSpace( lifeEventName ) ) return null;
+
+      var dataHandlerType = GameTypeResolver.Get( "DataHandler" );
+      var method = dataHandlerType?.GetMethod( "GetLifeEvent", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof( string ) }, null );
+      return method?.Invoke( null, new object[] { lifeEventName } );
+   }
+
+   private static object ResolveInteractionFromLifeEvent( object lifeEvent )
+   {
+      var interactionName = GetStringMember( lifeEvent, "strInteraction" );
+      if( string.IsNullOrWhiteSpace( interactionName ) ) return null;
+
+      var dataHandlerType = GameTypeResolver.Get( "DataHandler" );
+      var jsonInteractionSaveType = GameTypeResolver.Get( "JsonInteractionSave" );
+      var method = dataHandlerType?.GetMethod( "GetInteraction", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof( string ), jsonInteractionSaveType, typeof( bool ) }, null );
+      return method?.Invoke( null, new object[] { interactionName, null, false } );
+   }
+
+   private static string GetStringMember( object target, string memberName )
+   {
+      if( target == null || string.IsNullOrWhiteSpace( memberName ) ) return string.Empty;
+
+      var field = RuntimeHookTranslationHelper.GetInstanceField( target.GetType(), memberName );
+      if( field?.GetValue( target ) is string value ) return value;
+
+      var property = target.GetType().GetProperty( memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      if( property?.GetValue( target ) is string propertyValue ) return propertyValue;
+
+      return string.Empty;
+   }
+
+   private static string[] GetStringArrayMember( object target, string memberName )
+   {
+      if( target == null || string.IsNullOrWhiteSpace( memberName ) ) return Array.Empty<string>();
+
+      var field = RuntimeHookTranslationHelper.GetInstanceField( target.GetType(), memberName );
+      if( field?.GetValue( target ) is string[] values ) return values;
+
+      var property = target.GetType().GetProperty( memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      if( property?.GetValue( target ) is string[] propertyValues ) return propertyValues;
+
+      return Array.Empty<string>();
+   }
+
+   private static double GetDoubleMember( object target, string memberName )
+   {
+      if( target == null || string.IsNullOrWhiteSpace( memberName ) ) return 0.0;
+
+      var field = RuntimeHookTranslationHelper.GetInstanceField( target.GetType(), memberName );
+      if( field != null )
+      {
+         var value = field.GetValue( target );
+         if( value is float floatValue ) return floatValue;
+         if( value is double doubleValue ) return doubleValue;
+      }
+
+      var property = target.GetType().GetProperty( memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      if( property != null )
+      {
+         var value = property.GetValue( target );
+         if( value is float floatValue ) return floatValue;
+         if( value is double doubleValue ) return doubleValue;
+      }
+
+      return 0.0;
+   }
+
+   private static bool GetBoolMember( object target, string memberName )
+   {
+      if( target == null || string.IsNullOrWhiteSpace( memberName ) ) return false;
+
+      var field = RuntimeHookTranslationHelper.GetInstanceField( target.GetType(), memberName );
+      if( field?.GetValue( target ) is bool value ) return value;
+
+      var property = target.GetType().GetProperty( memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      if( property?.GetValue( target ) is bool propertyValue ) return propertyValue;
+
+      return false;
+   }
+}
+
+internal static class ChargenFlowLogHelper
+{
+   public static void LogGetRandomEvent( object guiChargenCareer, object evt )
+   {
+      var latestCareer = GetLatestCareer( guiChargenCareer );
+      var careerId = GetStringMember( latestCareer, "strJC" );
+      var eventCount = GetStringListCount( latestCareer, "aEvents" );
+      OstranautsTranslatorPlugin.LogDiagnostic( $"[ChargenFlow] GetRandomEvent evt={evt} career={careerId} eventCount={eventCount}" );
+   }
+
+   public static void LogPageEvent( object jle )
+   {
+      var lifeEventName = GetStringMember( jle, "strName" );
+      var interactionName = GetStringMember( ResolveInteractionFromLifeEvent( jle ), "strName" );
+      var title = GetStringMember( ResolveInteractionFromLifeEvent( jle ), "strTitle" );
+      OstranautsTranslatorPlugin.LogDiagnostic( $"[ChargenFlow] PageEvent lifeEvent={lifeEventName} interaction={interactionName} title={title}" );
+   }
+
+   public static void LogCareerSummary( object guiChargenCareer )
+   {
+      var latestCareer = GetLatestCareer( guiChargenCareer );
+      var careerId = GetStringMember( latestCareer, "strJC" );
+      var eventCount = GetStringListCount( latestCareer, "aEvents" );
+      var lastEvent = GetLastStringListValue( latestCareer, "aEvents" );
+      OstranautsTranslatorPlugin.LogDiagnostic( $"[ChargenFlow] PageCareerTermSummary career={careerId} eventCount={eventCount} lastEvent={TrimForLog( lastEvent )}" );
+   }
+
+   private static object GetLatestCareer( object guiChargenCareer )
+   {
+      var cgs = RuntimeHookTranslationHelper.GetInstanceField( guiChargenCareer?.GetType(), "cgs" )?.GetValue( guiChargenCareer );
+      return cgs?.GetType().GetMethod( "GetLatestCareer", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null )?.Invoke( cgs, Array.Empty<object>() );
+   }
+
+   private static object ResolveInteractionFromLifeEvent( object lifeEvent )
+   {
+      var interactionName = GetStringMember( lifeEvent, "strInteraction" );
+      if( string.IsNullOrWhiteSpace( interactionName ) ) return null;
+
+      var dataHandlerType = GameTypeResolver.Get( "DataHandler" );
+      var jsonInteractionSaveType = GameTypeResolver.Get( "JsonInteractionSave" );
+      var method = dataHandlerType?.GetMethod( "GetInteraction", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof( string ), jsonInteractionSaveType, typeof( bool ) }, null );
+      return method?.Invoke( null, new object[] { interactionName, null, false } );
+   }
+
+   private static string GetStringMember( object target, string memberName )
+   {
+      if( target == null || string.IsNullOrWhiteSpace( memberName ) ) return string.Empty;
+
+      var field = RuntimeHookTranslationHelper.GetInstanceField( target.GetType(), memberName );
+      if( field?.GetValue( target ) is string value ) return value;
+
+      var property = target.GetType().GetProperty( memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      if( property?.GetValue( target ) is string propertyValue ) return propertyValue;
+
+      return string.Empty;
+   }
+
+   private static int GetStringListCount( object target, string memberName )
+   {
+      if( target == null || string.IsNullOrWhiteSpace( memberName ) ) return 0;
+
+      var field = RuntimeHookTranslationHelper.GetInstanceField( target.GetType(), memberName );
+      if( field?.GetValue( target ) is IList values ) return values.Count;
+
+      var property = target.GetType().GetProperty( memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      if( property?.GetValue( target ) is IList propertyValues ) return propertyValues.Count;
+
+      return 0;
+   }
+
+   private static string GetLastStringListValue( object target, string memberName )
+   {
+      if( target == null || string.IsNullOrWhiteSpace( memberName ) ) return string.Empty;
+
+      var field = RuntimeHookTranslationHelper.GetInstanceField( target.GetType(), memberName );
+      if( field?.GetValue( target ) is IList values && values.Count > 0 && values[ values.Count - 1 ] is string lastValue ) return lastValue;
+
+      var property = target.GetType().GetProperty( memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      if( property?.GetValue( target ) is IList propertyValues && propertyValues.Count > 0 && propertyValues[ propertyValues.Count - 1 ] is string propertyLastValue ) return propertyLastValue;
+
+      return string.Empty;
+   }
+
+   private static string TrimForLog( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return string.Empty;
+
+      var trimmed = value.Replace( Environment.NewLine, " ").Replace( '\n', ' ' ).Trim();
+      return trimmed.Length <= 120 ? trimmed : trimmed.Substring( 0, 120 ) + "...";
+   }
+}
 
 [HarmonyPatch]
 internal static class GUIChargenCareer_RebuildMultiSelectSidebar_Hook
@@ -8076,6 +8698,11 @@ internal static class GUIChargenCareer_ClickEvent_Hook
       return null;
    }
 
+   private static void Prefix( object __instance, ref object jleNext )
+   {
+      ChargenRiskOutcomeHelper.PrepareClickedOutcome( __instance, ref jleNext );
+   }
+
    private static void Postfix( object __instance )
    {
       ChargenCareerRuntimeTranslationHelper.TranslateMainPanel( __instance, "GUIChargenCareer.ClickEvent" );
@@ -8099,8 +8726,93 @@ internal static class GUIChargenCareer_PageEvent_Hook
          new[] { GameTypeResolver.Get( "JsonLifeEvent" ) } );
    }
 
+   private static void Prefix( object __instance, object jle )
+   {
+      ChargenFlowLogHelper.LogPageEvent( jle );
+      ChargenRiskOutcomeHelper.BeginPageEvent( __instance, jle );
+   }
+
    private static void Postfix( object __instance )
    {
       ChargenCareerRuntimeTranslationHelper.TranslateMainPanel( __instance, "GUIChargenCareer.PageEvent" );
+   }
+
+   private static void Finalizer()
+   {
+      ChargenRiskOutcomeHelper.EndPageEvent();
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIChargenCareer_GetRandomEvent_FlowLog_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIChargenCareer" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      var guiChargenCareerType = GameTypeResolver.Get( "GUIChargenCareer" );
+      if( guiChargenCareerType == null ) return null;
+
+      foreach( var method in guiChargenCareerType.GetMethods( BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic ) )
+      {
+         if( !string.Equals( method.Name, "GetRandomEvent", StringComparison.Ordinal ) ) continue;
+         var parameters = method.GetParameters();
+         if( parameters.Length != 1 ) continue;
+         return method;
+      }
+
+      return null;
+   }
+
+   private static void Prefix( object __instance, object evt )
+   {
+      ChargenFlowLogHelper.LogGetRandomEvent( __instance, evt );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIChargenCareer_PageCareerTermSummary_FlowLog_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "GUIChargenCareer" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "GUIChargenCareer" ), "PageCareerTermSummary", Type.EmptyTypes );
+   }
+
+   private static void Prefix( object __instance )
+   {
+      ChargenFlowLogHelper.LogCareerSummary( __instance );
+   }
+}
+
+[HarmonyPatch]
+internal static class Interaction_Triggered_ChargenRiskOutcome_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Interaction" ) != null
+         && GameTypeResolver.Get( "CondOwner" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "Interaction" ),
+         "Triggered",
+         new[] { GameTypeResolver.Get( "CondOwner" ), GameTypeResolver.Get( "CondOwner" ), typeof( bool ), typeof( bool ), typeof( bool ), typeof( bool ), typeof( List<string> ) } );
+   }
+
+   private static bool Prefix( object __instance, object objUs, object objThem, ref bool __result )
+   {
+      if( !ChargenRiskOutcomeHelper.TryOverrideTriggered( __instance, objUs, objThem, ref __result ) ) return true;
+
+      return false;
    }
 }
