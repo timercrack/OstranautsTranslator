@@ -156,7 +156,13 @@ internal static class RuntimeTextHookHelper
    {
       if( string.IsNullOrEmpty( value ) ) return value;
 
-      var translated = OstranautsTranslatorPlugin.Translate( value, hookName );
+      if( MarketRuntimeTranslationHelper.TryTranslateFixedMarketText( value, out var fixedMarketText ) )
+      {
+         return fixedMarketText;
+      }
+
+      var translated = MarketRuntimeTranslationHelper.NormalizeMarketRichTextColorTags(
+         OstranautsTranslatorPlugin.Translate( value, hookName ) );
       if( !string.Equals( translated, value, StringComparison.Ordinal ) )
       {
          return translated;
@@ -164,7 +170,14 @@ internal static class RuntimeTextHookHelper
 
       foreach( var candidate in EnumerateCaseVariants( value ) )
       {
-         translated = OstranautsTranslatorPlugin.Translate( candidate, hookName + ".case" );
+         if( MarketRuntimeTranslationHelper.TryTranslateFixedMarketText( candidate, out fixedMarketText )
+            && !string.Equals( fixedMarketText, candidate, StringComparison.Ordinal ) )
+         {
+            return fixedMarketText;
+         }
+
+         translated = MarketRuntimeTranslationHelper.NormalizeMarketRichTextColorTags(
+            OstranautsTranslatorPlugin.Translate( candidate, hookName + ".case" ) );
          if( !string.Equals( translated, candidate, StringComparison.Ordinal ) )
          {
             return translated;

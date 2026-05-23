@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using BepInEx;
 using BepInEx.Logging;
 using OstranautsTranslator.Plugin.BepInEx.Configuration;
@@ -17,6 +18,7 @@ internal static class TmpFontManager
    private static readonly List<UnityEngine.Object> OverrideFonts = new List<UnityEngine.Object>();
    private static readonly Dictionary<string, Material> OverrideMaterialCopies = new Dictionary<string, Material>( StringComparer.Ordinal );
    private static readonly HashSet<string> UnsupportedReplacementMaterialTypes = new HashSet<string>( StringComparer.Ordinal );
+   private static readonly ConditionalWeakTable<object, OverrideFontState> OverrideFontStates = new ConditionalWeakTable<object, OverrideFontState>();
 
    private static ManualLogSource _logger;
    private static string _overrideFontName;
@@ -26,6 +28,12 @@ internal static class TmpFontManager
    private static bool _suspendOverrideForCharsetExport;
    private static bool _suspendOverrideLogged;
    private static bool _deferredLoadingSweepNeeded;
+
+   private sealed class OverrideFontState
+   {
+      public int ReplacementFontInstanceId;
+      public bool HasAppliedReplacement;
+   }
 
    public static void Initialize( ManualLogSource logger, string overrideFontName )
    {
@@ -148,6 +156,17 @@ internal static class TmpFontManager
 
       try
       {
+         var replacementFont = GetPrimaryOverrideFont();
+         if( replacementFont == null ) return false;
+
+         var replacementFontObject = replacementFont as UnityEngine.Object;
+         var replacementFontInstanceId = replacementFontObject?.GetInstanceID() ?? 0;
+         var state = OverrideFontStates.GetOrCreateValue( textComponent );
+         if( state.HasAppliedReplacement && state.ReplacementFontInstanceId == replacementFontInstanceId )
+         {
+            return false;
+         }
+
          var type = textComponent.GetType();
          var fontProperty = type.GetProperty( "font", BindingFlags.Public | BindingFlags.Instance );
          if( fontProperty == null || !fontProperty.CanWrite ) return false;
@@ -167,13 +186,12 @@ internal static class TmpFontManager
          var fontMaterialProperty = type.GetProperty( "fontSharedMaterial", BindingFlags.Public | BindingFlags.Instance );
          var previousMaterial = fontMaterialProperty?.GetValue( textComponent, null ) as Material;
 
-         var replacementFont = GetPrimaryOverrideFont();
-         if( replacementFont == null ) return false;
-
          if( previousFont is UnityEngine.Object previousFontObject
-            && replacementFont is UnityEngine.Object replacementFontObject
+            && replacementFontObject != null
             && previousFontObject.GetInstanceID() == replacementFontObject.GetInstanceID() )
          {
+            state.HasAppliedReplacement = true;
+            state.ReplacementFontInstanceId = replacementFontInstanceId;
             return false;
          }
 
@@ -181,9 +199,14 @@ internal static class TmpFontManager
          {
             fontProperty.SetValue( textComponent, replacementFont, null );
             TryApplyReplacementMaterial( type, textComponent, previousMaterial, replacementFont );
+            state.HasAppliedReplacement = true;
+            state.ReplacementFontInstanceId = replacementFontInstanceId;
+            return true;
          }
 
-         return !IsSameUnityObject( previousFont, replacementFont );
+         state.HasAppliedReplacement = true;
+         state.ReplacementFontInstanceId = replacementFontInstanceId;
+         return false;
       }
       catch( Exception e )
       {
@@ -325,7 +348,6 @@ internal static class TmpFontManager
 
       SetMaterialPropertyIfWritable( textComponentType, textComponent, "fontSharedMaterial", replacementMaterial );
       SetMaterialPropertyIfWritable( textComponentType, textComponent, "fontMaterial", replacementMaterial );
-      SetMaterialPropertyIfWritable( textComponentType, textComponent, "material", replacementMaterial );
       ReplaceFirstMaterialInArrayProperty( textComponentType, textComponent, "fontSharedMaterials", replacementMaterial );
       ReplaceFirstMaterialInArrayProperty( textComponentType, textComponent, "fontMaterials", replacementMaterial );
 

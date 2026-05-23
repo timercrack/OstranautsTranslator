@@ -124,6 +124,11 @@ internal static class RuntimeHookTranslationHelper
 
       var field = GetInstanceField( target.GetType(), fieldName );
       var component = field?.GetValue( target );
+      TranslateTextComponentIfChanged( component, translator );
+   }
+
+   public static void TranslateTextComponentIfChanged( object component, Func<string, string> translator )
+   {
       if( component == null ) return;
 
       var textProperty = GetStringProperty( component.GetType(), "text" );
@@ -1543,7 +1548,7 @@ internal static class SaveLoadRuntimeTranslationHelper
       var playerName = saveInfoType.GetProperty( "PlayerName", BindingFlags.Instance | BindingFlags.Public )?.GetValue( saveInfo ) as string ?? string.Empty;
       var shipName = saveInfoType.GetProperty( "ShipName", BindingFlags.Instance | BindingFlags.Public )?.GetValue( saveInfo ) as string ?? string.Empty;
       var translatedPlayer = RuntimeTextHookHelper.TranslateTextValue( playerName, "LoadListEntry.Setup.PlayerName" );
-      var translatedShip = TranslateCompositeLabel( shipName, "LoadListEntry.Setup.ShipName" );
+      var translatedShip = ShipRuntimeTranslationHelper.TranslateShipDisplayName( shipName, "LoadListEntry.Setup.ShipName" );
 
       if( string.IsNullOrWhiteSpace( translatedShip ) ) return translatedPlayer;
       if( string.IsNullOrWhiteSpace( translatedPlayer ) ) return translatedShip;
@@ -1853,6 +1858,7 @@ internal static class LogMessageRuntimeTranslationHelper
    private static readonly Regex StartsOpeningTargetRegex = new Regex( @"(?<action>开始(?:撬)?开|开始打开)\s*(?<target>(?:the\s+)?[A-Za-z][A-Za-z0-9'\- ]+?)(?<punct>[。.!?])", RegexOptions.Compiled | RegexOptions.CultureInvariant );
    private static readonly Regex RelationshipNowConsidersRegex = new Regex( @"^(?<subject>.+?) now considers (?<target>.+?) a\(n\) (?<relation>.+?)!$", RegexOptions.Compiled | RegexOptions.CultureInvariant );
    private static readonly Regex RelationshipNoLongerConsidersRegex = new Regex( @"^(?<subject>.+?) no longer considers (?<target>.+?) a\(n\) (?<relation>.+?)!$", RegexOptions.Compiled | RegexOptions.CultureInvariant );
+   private static readonly Regex DuplicatePossessiveParticleRegex = new Regex( @"(?<owner>你的|我的|他的|她的|它的|他们的)\s*的(?=(?:<[^>]+>|\s)*[\u3400-\u9FFF\uF900-\uFAFF])", RegexOptions.Compiled | RegexOptions.CultureInvariant );
    private static readonly IReadOnlyDictionary<string, string> MixedGrammarTokenMap = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase )
    {
       [ "you" ] = "你",
@@ -1892,7 +1898,7 @@ internal static class LogMessageRuntimeTranslationHelper
       [ "Gate B Airlock" ] = "B号闸门气闸",
       [ "Gate C Airlock" ] = "C号闸门气闸",
    };
-   private static readonly Regex MixedGrammarTokenRegex = new Regex( @"\b(?:you|your|yours|yourself|me|my|myself|them|their|themself|he|his|him|himself|she|her|herself|it|its|itself|sneer|sneers|mutter|mutters|finds|find|knows|know|pretends|pretend)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant );
+   private static readonly Regex MixedGrammarTokenRegex = new Regex( @"(?<![A-Za-z])(?:yourself|yours|your|you|myself|my|me|their|themself|them|himself|his|him|he|herself|her|she|itself|its|it|sneers|sneer|mutters|mutter|finds|find|knows|know|pretends|pretend)(?![A-Za-z])", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant );
    private static readonly Regex SneerMutterNamePattern = new Regex( @"\s对\s+你\s+冷笑\s+并\s+咕哝\s+用多国语言诅咒\s+你的\s+名字", RegexOptions.Compiled | RegexOptions.CultureInvariant );
 
    public static string TranslateMessage( string value )
@@ -1970,6 +1976,7 @@ internal static class LogMessageRuntimeTranslationHelper
       normalized = RichTextLeadingYouBeforeCjkRegex.Replace( normalized, match => match.Groups[ 1 ].Value + match.Groups[ "prefix" ].Value + "你" );
       normalized = MixedStandaloneTheRegex.Replace( normalized, string.Empty );
       normalized = TranslateMixedGrammarTokens( normalized );
+      normalized = DuplicatePossessiveParticleRegex.Replace( normalized, match => match.Groups[ "owner" ].Value );
       normalized = SneerMutterNamePattern.Replace( normalized, " 对你冷笑，并咕哝着用多国语言诅咒你的名字" );
       return normalized;
    }
@@ -2412,6 +2419,9 @@ internal static class ControlsRuntimeTranslationHelper
 
 internal static class MfdRuntimeTranslationHelper
 {
+   private static readonly Regex ColorOpenTagRegex = new Regex( @"<color=(?<name>[^>]+)>", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase );
+   private static readonly Regex ColorCloseTagRegex = new Regex( @"</color>", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase );
+   private static readonly Regex ColorTagWrapperRegex = new Regex( @"^(?<prefix><color=.*?>)(?<body>.*?)(?<suffix></color>)$", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase );
    private static readonly IReadOnlyDictionary<string, string> ExactTextMap = new Dictionary<string, string>( StringComparer.Ordinal )
    {
       [ "LOCAL CHANNEL" ] = "本地频道",
@@ -2452,13 +2462,14 @@ internal static class MfdRuntimeTranslationHelper
    {
       if( string.IsNullOrWhiteSpace( value ) ) return value;
 
-      var translated = RuntimeTextHookHelper.TranslateTextValue( value, "GUIMFDDisplay.ShowMenu" );
-      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      value = NormalizeMfdRichTextColorTags( value );
+
+      if( TryTranslateRichTextStatus( value, out var richTextTranslated ) )
       {
-         return translated;
+         return richTextTranslated;
       }
 
-      translated = TranslateDirectionalText( value );
+      var translated = TranslateDirectionalText( value );
       if( !string.Equals( translated, value, StringComparison.Ordinal ) )
       {
          return translated;
@@ -2523,21 +2534,6 @@ internal static class MfdRuntimeTranslationHelper
       if( value.StartsWith( "LOCKING ", StringComparison.Ordinal ) && value.EndsWith( "%", StringComparison.Ordinal ) )
       {
          return "锁定中 " + value.Substring( "LOCKING ".Length );
-      }
-
-      if( value.Equals( "<color=green>LOCKED</color>", StringComparison.Ordinal ) )
-      {
-         return "<color=green>已锁定</color>";
-      }
-
-      if( value.Equals( "<color=white>HOSTILE</color>", StringComparison.Ordinal ) )
-      {
-         return "<color=white>敌对</color>";
-      }
-
-      if( value.Equals( "<color=white>FRIENDLY</color>", StringComparison.Ordinal ) )
-      {
-         return "<color=white>友方</color>";
       }
 
       if( value.Equals( "MARK", StringComparison.Ordinal ) )
@@ -2628,7 +2624,85 @@ internal static class MfdRuntimeTranslationHelper
          }
       }
 
+      translated = RuntimeTextHookHelper.TranslateTextValue( value, "GUIMFDDisplay.ShowMenu" );
+      if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+      {
+         return NormalizeMfdRichTextColorTags( translated );
+      }
+
    return ExactTextMap.TryGetValue( value, out var exactText ) ? exactText : value;
+   }
+
+   private static bool TryTranslateRichTextStatus( string value, out string translatedValue )
+   {
+      var match = ColorTagWrapperRegex.Match( value );
+      if( !match.Success )
+      {
+         translatedValue = string.Empty;
+         return false;
+      }
+
+      var body = match.Groups[ "body" ].Value;
+      var translatedBody = body switch
+      {
+         "LOCKED" => "已锁定",
+         "HOSTILE" => "敌对",
+         "FRIENDLY" => "友方",
+         "VIZ" => "可视化",
+         _ => string.Empty,
+      };
+
+      if( string.IsNullOrEmpty( translatedBody ) )
+      {
+         translatedValue = string.Empty;
+         return false;
+      }
+
+      translatedValue = match.Groups[ "prefix" ].Value + translatedBody + match.Groups[ "suffix" ].Value;
+      return true;
+   }
+
+   private static string NormalizeMfdRichTextColorTags( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var normalized = ColorOpenTagRegex.Replace( value, match => TryResolveMfdColorName( match.Groups[ "name" ].Value, out var resolvedColorName )
+         ? "<color=" + resolvedColorName + ">"
+         : "<color=" + match.Groups[ "name" ].Value + ">" );
+      return ColorCloseTagRegex.Replace( normalized, "</color>" );
+   }
+
+   private static bool TryResolveMfdColorName( string rawColorName, out string resolvedColorName )
+   {
+      var normalized = rawColorName.Trim();
+      if( normalized.StartsWith( "#", StringComparison.Ordinal ) )
+      {
+         resolvedColorName = normalized;
+         return true;
+      }
+
+      switch( normalized.ToLowerInvariant() )
+      {
+         case "green":
+         case "绿色":
+         case "格林":
+            resolvedColorName = "green";
+            return true;
+
+         case "red":
+         case "红色":
+            resolvedColorName = "red";
+            return true;
+
+         case "white":
+         case "白色":
+            resolvedColorName = "white";
+            return true;
+
+         default:
+            resolvedColorName = normalized;
+            return false;
+      }
    }
 
    private static string TranslateDirectionalText( string value )
@@ -2717,6 +2791,14 @@ internal static class NavStationRuntimeTranslationHelper
 
 internal static class ShipRuntimeTranslationHelper
 {
+   private static readonly ConditionalWeakTable<object, TargetDataPanelCache> TargetDataPanelCaches = new ConditionalWeakTable<object, TargetDataPanelCache>();
+   private static readonly Regex ShipNameSeparatorRegex = new Regex( "(\\s+)", RegexOptions.Compiled | RegexOptions.CultureInvariant );
+   private static readonly Regex LatinLetterRegex = new Regex( "[A-Za-z]", RegexOptions.Compiled | RegexOptions.CultureInvariant );
+   private static readonly Regex CjkSpacingRegex = new Regex( "(?<=[\\u3400-\\u9FFF])\\s+(?=[\\u3400-\\u9FFF])", RegexOptions.Compiled | RegexOptions.CultureInvariant );
+   private static readonly IReadOnlyDictionary<string, string> ShipNameTokenExactMap = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase )
+   {
+      [ "Brain" ] = "大脑",
+   };
    private static readonly string[] ShipInfoFieldNames =
    {
       "make",
@@ -2737,14 +2819,39 @@ internal static class ShipRuntimeTranslationHelper
       "txtDesignation",
    };
 
+   private sealed class TargetDataPanelCache
+   {
+      public readonly List<object> Components = new List<object>();
+      public bool Initialized;
+   }
+
    public static void TranslateShipInfo( object shipInfo, string hookName )
    {
       if( shipInfo == null ) return;
 
       foreach( var fieldName in ShipInfoFieldNames )
       {
-         RuntimeHookTranslationHelper.TranslateStringField( shipInfo, fieldName, value => RuntimeTextHookHelper.TranslateTextValue( value, hookName + "." + fieldName ) );
+         RuntimeHookTranslationHelper.TranslateStringField(
+            shipInfo,
+            fieldName,
+            value => string.Equals( fieldName, "publicName", StringComparison.Ordinal )
+               ? TranslateShipDisplayName( value, hookName + "." + fieldName )
+               : RuntimeTextHookHelper.TranslateTextValue( value, hookName + "." + fieldName ) );
       }
+   }
+
+   public static string TranslateShipDisplayName( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      var tokenTranslated = TranslateShipDisplayNameTokens( value, hookName + ".tokens" );
+      if( CountLatinLetters( tokenTranslated ) < CountLatinLetters( translated ) )
+      {
+         return tokenTranslated;
+      }
+
+      return NormalizeShipDisplayNameSpacing( translated );
    }
 
    public static void TranslateXpdrPanel( object panel, string hookName )
@@ -2753,6 +2860,12 @@ internal static class ShipRuntimeTranslationHelper
 
       foreach( var fieldName in XpdrFieldNames )
       {
+         if( string.Equals( fieldName, "txtShipName", StringComparison.Ordinal ) )
+         {
+            RuntimeHookTranslationHelper.TranslateTextComponentField( panel, fieldName, value => TranslateShipDisplayName( value, hookName + "." + fieldName ) );
+            continue;
+         }
+
          RuntimeHookTranslationHelper.TranslateTextComponentField( panel, fieldName, hookName );
       }
    }
@@ -2761,14 +2874,14 @@ internal static class ShipRuntimeTranslationHelper
    {
       if( guiData == null ) return;
 
-      RuntimeHookTranslationHelper.TranslateStringField( guiData, "strFriendlyName", value => RuntimeTextHookHelper.TranslateTextValue( value, hookName + ".strFriendlyName" ) );
+      RuntimeHookTranslationHelper.TranslateStringField( guiData, "strFriendlyName", value => TranslateShipDisplayName( value, hookName + ".strFriendlyName" ) );
 
       var dictField = RuntimeHookTranslationHelper.GetInstanceField( guiData.GetType(), "dictPropMap" );
       if( dictField?.GetValue( guiData ) is IDictionary<string, string> dict
          && dict.TryGetValue( "strFriendlyName", out var friendlyName )
          && !string.IsNullOrWhiteSpace( friendlyName ) )
       {
-         dict[ "strFriendlyName" ] = RuntimeTextHookHelper.TranslateTextValue( friendlyName, hookName + ".dictPropMap.strFriendlyName" );
+         dict[ "strFriendlyName" ] = TranslateShipDisplayName( friendlyName, hookName + ".dictPropMap.strFriendlyName" );
       }
    }
 
@@ -2776,24 +2889,30 @@ internal static class ShipRuntimeTranslationHelper
    {
       if( panel == null ) return;
 
+      var cache = TargetDataPanelCaches.GetOrCreateValue( panel );
+      EnsureTargetDataPanelCache( panel, cache );
+
+      for( var i = 0; i < cache.Components.Count; i++ )
+      {
+         var component = cache.Components[ i ];
+         RuntimeHookTranslationHelper.TranslateTextComponentIfChanged( component, value => TranslateTargetDataLine( value, hookName + "[" + i + "]" ) );
+      }
+   }
+
+   private static void EnsureTargetDataPanelCache( object panel, TargetDataPanelCache cache )
+   {
+      if( cache.Initialized ) return;
+
+      cache.Initialized = true;
       var field = RuntimeHookTranslationHelper.GetInstanceField( panel.GetType(), "txtArray" );
       if( field?.GetValue( panel ) is not Array textComponents ) return;
 
       for( var i = 0; i < textComponents.Length; i++ )
       {
          var component = textComponents.GetValue( i );
-         if( component == null ) continue;
-
-         var textProperty = RuntimeHookTranslationHelper.GetStringProperty( component.GetType(), "text" );
-         if( textProperty == null || !textProperty.CanRead || !textProperty.CanWrite || textProperty.PropertyType != typeof( string ) ) continue;
-
-         var value = textProperty.GetValue( component ) as string;
-         if( string.IsNullOrWhiteSpace( value ) ) continue;
-
-         var translated = TranslateTargetDataLine( value, hookName + "[" + i + "]" );
-         if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+         if( component != null )
          {
-            textProperty.SetValue( component, translated );
+            cache.Components.Add( component );
          }
       }
    }
@@ -2859,6 +2978,192 @@ internal static class ShipRuntimeTranslationHelper
       if( index < 0 ) return value;
 
       return value.Substring( 0, index ) + replacement + value.Substring( index + token.Length );
+   }
+
+   private static string TranslateShipDisplayNameTokens( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var segments = ShipNameSeparatorRegex.Split( value );
+      var changed = false;
+      for( var i = 0; i < segments.Length; i++ )
+      {
+         var segment = segments[ i ];
+         if( string.IsNullOrWhiteSpace( segment ) || !LatinLetterRegex.IsMatch( segment ) ) continue;
+
+         var translatedSegment = ShipNameTokenExactMap.TryGetValue( segment, out var exactTranslatedSegment )
+            ? exactTranslatedSegment
+            : RuntimeTextHookHelper.TranslateTextValue( segment, hookName + "[" + i + "]" );
+         if( string.Equals( translatedSegment, segment, StringComparison.Ordinal ) ) continue;
+
+         segments[ i ] = translatedSegment;
+         changed = true;
+      }
+
+      return changed
+         ? NormalizeShipDisplayNameSpacing( string.Concat( segments ) )
+         : NormalizeShipDisplayNameSpacing( value );
+   }
+
+   private static string NormalizeShipDisplayNameSpacing( string value )
+   {
+      return string.IsNullOrWhiteSpace( value )
+         ? value
+         : CjkSpacingRegex.Replace( value, string.Empty );
+   }
+
+   private static int CountLatinLetters( string value )
+   {
+      if( string.IsNullOrEmpty( value ) ) return 0;
+
+      var count = 0;
+      foreach( var ch in value )
+      {
+         if( ( ch >= 'A' && ch <= 'Z' ) || ( ch >= 'a' && ch <= 'z' ) ) count++;
+      }
+
+      return count;
+   }
+}
+
+internal static class DiagnosticsRuntimeTranslationHelper
+{
+   private static readonly IReadOnlyDictionary<string, string> ShipStatusLabelMap = new Dictionary<string, string>( StringComparer.Ordinal )
+   {
+      [ "VESSEL RATING CODE:" ] = "船舶评级代码：",
+      [ "VESSEL MASS:" ] = "舰船质量：",
+      [ "TRANSPONDER:" ] = "应答器：",
+      [ "TRANSPONDER ANTENNA:" ] = "应答器天线：",
+      [ "NAV STATION:" ] = "导航站：",
+      [ "REACTOR:" ] = "反应堆：",
+      [ "REACTOR HE3:" ] = "反应堆 HE3：",
+      [ "REACTOR D2O:" ] = "反应堆 D2O：",
+      [ "RCS THRUSTERS:" ] = "RCS 推进器：",
+      [ "RCS DISTRIBUTOR:" ] = "RCS 分配器：",
+      [ "RCS REMASS:" ] = "RCS 剩余质量：",
+      [ "BACKUP POWER:" ] = "备用电力：",
+      [ "LIFE SUPPORT WORKING O2 PUMPS:" ] = "生命维持-工作氧气泵：",
+      [ "LIFE SUPPORT O2 STORES:" ] = "生命维持-氧气存量：",
+      [ "LIFE SUPPORT HEAT:" ] = "生命维持-供热：",
+      [ "LIFE SUPPORT COOL:" ] = "生命维持-冷却：",
+   };
+
+   private static bool _shipStatusLabelsTranslated;
+
+   public static void EnsureShipStatusLabelsTranslated()
+   {
+      if( _shipStatusLabelsTranslated ) return;
+
+      var shipStatusType = GameTypeResolver.Get( "ShipStatus" );
+      var namesField = shipStatusType?.GetField( "aNames", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic );
+      if( namesField?.GetValue( null ) is not string[] labels ) return;
+
+      for( var i = 0; i < labels.Length; i++ )
+      {
+         if( ShipStatusLabelMap.TryGetValue( labels[ i ], out var translatedLabel ) )
+         {
+            labels[ i ] = translatedLabel;
+         }
+      }
+
+      _shipStatusLabelsTranslated = true;
+   }
+
+   public static void TranslateStatusValues( string[] values )
+   {
+      if( values == null ) return;
+
+      for( var i = 0; i < values.Length; i++ )
+      {
+         values[ i ] = TranslateStatusValue( values[ i ], "ShipStatus.PrintStatus[" + i + "]" );
+      }
+   }
+
+   public static string TranslateLogHeaderEntry( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      if( TryTranslatePrefixedEntry( value, "Vessel Name: ", "船名：", ShipRuntimeTranslationHelper.TranslateShipDisplayName, hookName, out var translated ) )
+      {
+         return translated;
+      }
+
+      if( TryTranslatePrefixedEntry( value, "REGID: ", "注册号：", static ( entryValue, _ ) => entryValue, hookName, out translated ) )
+      {
+         return translated;
+      }
+
+      if( TryTranslatePrefixedEntry( value, "Date of Construction: ", "建造日期：", static ( entryValue, _ ) => entryValue, hookName, out translated ) )
+      {
+         return translated;
+      }
+
+      if( TryTranslatePrefixedEntry( value, "Make: ", "制造商：", RuntimeTextHookHelper.TranslateTextValue, hookName, out translated ) )
+      {
+         return translated;
+      }
+
+      if( TryTranslatePrefixedEntry( value, "Model: ", "型号：", RuntimeTextHookHelper.TranslateTextValue, hookName, out translated ) )
+      {
+         return translated;
+      }
+
+      if( TryTranslatePrefixedEntry( value, "Homeport: ", "母港：", RuntimeTextHookHelper.TranslateTextValue, hookName, out translated ) )
+      {
+         return translated;
+      }
+
+      if( TryTranslatePrefixedEntry( value, "Designation: ", "用途：", RuntimeTextHookHelper.TranslateTextValue, hookName, out translated ) )
+      {
+         return translated;
+      }
+
+      if( TryTranslatePrefixedEntry( value, "Total Mass: ", "总质量：", static ( entryValue, _ ) => entryValue, hookName, out translated ) )
+      {
+         return translated;
+      }
+
+      if( string.Equals( value, "-- -- --", StringComparison.Ordinal ) )
+      {
+         return "-----";
+      }
+
+      translated = LogMessageRuntimeTranslationHelper.TranslateLogMarkup( value, hookName );
+      return string.Equals( translated, value, StringComparison.Ordinal )
+         ? RuntimeTextHookHelper.TranslateTextValue( value, hookName )
+         : translated;
+   }
+
+   private static string TranslateStatusValue( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var translated = RuntimeTextHookHelper.TranslateTextValue( value, hookName );
+      translated = ReplaceOrdinal( translated, "NOT FOUND", "未找到" );
+      translated = ReplaceOrdinal( translated, "OFFLINE", "离线" );
+      translated = ReplaceOrdinal( translated, "ONLINE", "在线" );
+      translated = ReplaceOrdinal( translated, "ERROR", "错误" );
+      return translated;
+   }
+
+   private static bool TryTranslatePrefixedEntry( string value, string prefix, string translatedPrefix, Func<string, string, string> translator, string hookName, out string translated )
+   {
+      if( value.StartsWith( prefix, StringComparison.Ordinal ) )
+      {
+         translated = translatedPrefix + translator( value.Substring( prefix.Length ), hookName + ".value" );
+         return true;
+      }
+
+      translated = string.Empty;
+      return false;
+   }
+
+   private static string ReplaceOrdinal( string value, string oldValue, string newValue )
+   {
+      var index = value.IndexOf( oldValue, StringComparison.Ordinal );
+      if( index < 0 ) return value;
+
+      return value.Substring( 0, index ) + newValue + value.Substring( index + oldValue.Length );
    }
 }
 
@@ -3827,15 +4132,41 @@ internal static class ReservesRuntimeTranslationHelper
 
 internal static class MooringRuntimeTranslationHelper
 {
+   private static readonly ConditionalWeakTable<object, SemanticLabelCache> SemanticLabelCaches = new ConditionalWeakTable<object, SemanticLabelCache>();
+
+   private sealed class SemanticLabelCache
+   {
+      public readonly List<SemanticLabelTarget> Targets = new List<SemanticLabelTarget>();
+      public bool Initialized;
+      public string LastActionLabel = string.Empty;
+      public bool? LastTetherActiveState;
+   }
+
+   private sealed class SemanticLabelTarget
+   {
+      public object Component;
+      public PropertyInfo TextProperty;
+      public MooringSemanticLabelKind Kind;
+   }
+
+   private enum MooringSemanticLabelKind
+   {
+      DockStatus,
+      ClampAlign,
+      Action,
+   }
+
    public static string TranslateTargetStatusText( string value )
    {
       if( string.IsNullOrWhiteSpace( value ) ) return value;
 
       var translated = ReplaceToken( value, ">VALID<", ">有效<" );
       translated = ReplaceToken( translated, ">INVALID<", ">无效<" );
+      translated = MarketRuntimeTranslationHelper.NormalizeMarketRichTextColorTags( translated );
 
       return string.Equals( translated, value, StringComparison.Ordinal )
-         ? RuntimeTextHookHelper.TranslateTextValue( value, "NavModMooringControl.UpdateText.txtTargetStatus" )
+         ? MarketRuntimeTranslationHelper.NormalizeMarketRichTextColorTags(
+            RuntimeTextHookHelper.TranslateTextValue( value, "NavModMooringControl.UpdateText.txtTargetStatus" ) )
          : translated;
    }
 
@@ -3846,8 +4177,45 @@ internal static class MooringRuntimeTranslationHelper
       var root = RuntimeTextHookHelper.GetGameObject( navModMooringControl );
       if( root == null ) return;
 
+      var cache = SemanticLabelCaches.GetOrCreateValue( navModMooringControl );
+      EnsureSemanticLabelTargets( root, cache );
+
       var isMoored = IsMoored( navModMooringControl );
       var actionLabel = isMoored ? "解锁" : "接合";
+      if( cache.Initialized && string.Equals( cache.LastActionLabel, actionLabel, StringComparison.Ordinal ) )
+      {
+         return;
+      }
+
+      ApplySemanticLabelTargets( cache, actionLabel );
+      cache.LastActionLabel = actionLabel;
+   }
+
+   public static void TranslateTetherIfStateChanged( object navModMooringControl, object tetherGameObject )
+   {
+      if( navModMooringControl == null || tetherGameObject == null ) return;
+
+      var cache = SemanticLabelCaches.GetOrCreateValue( navModMooringControl );
+      var activeSelf = tetherGameObject.GetType().GetProperty( "activeSelf", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic )?.GetValue( tetherGameObject, null ) as bool?;
+      if( activeSelf == null ) return;
+
+      if( cache.LastTetherActiveState == activeSelf.Value )
+      {
+         return;
+      }
+
+      cache.LastTetherActiveState = activeSelf.Value;
+      if( activeSelf.Value && tetherGameObject is UnityEngine.GameObject gameObject )
+      {
+         RuntimeTextHookHelper.TranslateHierarchyIfChanged( gameObject, "NavModMooringControl.goTether" );
+      }
+   }
+
+   private static void EnsureSemanticLabelTargets( UnityEngine.GameObject root, SemanticLabelCache cache )
+   {
+      if( cache.Initialized ) return;
+
+      cache.Initialized = true;
 
       var getComponentsInChildren = typeof( UnityEngine.GameObject ).GetMethod( "GetComponentsInChildren", new[] { typeof( Type ), typeof( bool ) } );
       if( getComponentsInChildren?.Invoke( root, new object[] { typeof( UnityEngine.Component ), true } ) is not IEnumerable components ) return;
@@ -3858,18 +4226,79 @@ internal static class MooringRuntimeTranslationHelper
          if( textProperty?.CanRead != true || textProperty.CanWrite != true ) continue;
 
          var value = textProperty.GetValue( component ) as string;
-         var replacement = value switch
+         if( !TryResolveSemanticLabelKind( value, out var kind ) )
          {
-            "DOCK SYS CLAMP" or "Dock Sys Clamp" or "dock sys clamp" or "对接锁" => "已停泊",
-            "CLAMP ALIGN" or "Clamp Align" or "clamp align" or "锁扣对准" => "接合就绪",
-            "CLAMPS" or "Clamps" or "clamps" or "锁扣" or "TETHER" or "系泊" or "系绳" => actionLabel,
+            continue;
+         }
+
+         cache.Targets.Add( new SemanticLabelTarget
+         {
+            Component = component,
+            TextProperty = textProperty,
+            Kind = kind,
+         } );
+      }
+   }
+
+   private static void ApplySemanticLabelTargets( SemanticLabelCache cache, string actionLabel )
+   {
+      foreach( var target in cache.Targets )
+      {
+         if( target?.Component == null || target.TextProperty == null ) continue;
+
+         var replacement = target.Kind switch
+         {
+            MooringSemanticLabelKind.DockStatus => "已停泊",
+            MooringSemanticLabelKind.ClampAlign => "接合就绪",
+            MooringSemanticLabelKind.Action => actionLabel,
             _ => null,
          };
 
-         if( replacement != null && !string.Equals( replacement, value, StringComparison.Ordinal ) )
+         if( replacement == null ) continue;
+
+         var value = target.TextProperty.GetValue( target.Component ) as string;
+         if( !string.Equals( replacement, value, StringComparison.Ordinal ) )
          {
-            textProperty.SetValue( component, replacement );
+            target.TextProperty.SetValue( target.Component, replacement );
          }
+      }
+   }
+
+   private static bool TryResolveSemanticLabelKind( string value, out MooringSemanticLabelKind kind )
+   {
+      switch( value )
+      {
+         case "DOCK SYS CLAMP":
+         case "Dock Sys Clamp":
+         case "dock sys clamp":
+         case "对接锁":
+         case "已停泊":
+            kind = MooringSemanticLabelKind.DockStatus;
+            return true;
+
+         case "CLAMP ALIGN":
+         case "Clamp Align":
+         case "clamp align":
+         case "锁扣对准":
+         case "接合就绪":
+            kind = MooringSemanticLabelKind.ClampAlign;
+            return true;
+
+         case "CLAMPS":
+         case "Clamps":
+         case "clamps":
+         case "锁扣":
+         case "TETHER":
+         case "系泊":
+         case "系绳":
+         case "接合":
+         case "解锁":
+            kind = MooringSemanticLabelKind.Action;
+            return true;
+
+         default:
+            kind = default;
+            return false;
       }
    }
 
@@ -3974,6 +4403,115 @@ internal static class DockingRuntimeTranslationHelper
       var ship = coSelf == null ? null : RuntimeHookTranslationHelper.GetProperty( coSelf.GetType(), "ship" )?.GetValue( coSelf );
       var isDockedMethod = ship?.GetType().GetMethod( "IsDocked", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof( bool ) }, null );
       return isDockedMethod?.Invoke( ship, new object[] { true } ) as bool? == true;
+   }
+}
+
+internal static class CursorFallbackHelper
+{
+   private static readonly BindingFlags StaticFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+
+   public static void RestoreSystemCursorIfMissing( string context, object texture )
+   {
+      if( !IsMissingTexture( texture ) )
+      {
+         return;
+      }
+
+      RestoreSystemCursor();
+   }
+
+   public static object GetCrewCursorTexture( int cursorIndex )
+   {
+      var crewSimType = GameTypeResolver.Get( "CrewSim" );
+      if( crewSimType == null ) return null;
+
+      var cursorField = crewSimType.GetField( "aCursors", StaticFlags );
+      if( cursorField?.GetValue( null ) is not Array cursorTextures )
+      {
+         return null;
+      }
+
+      if( cursorIndex < 0 || cursorIndex >= cursorTextures.Length )
+      {
+         return null;
+      }
+
+      return cursorTextures.GetValue( cursorIndex );
+   }
+
+   public static object LoadMainMenuCursorTexture()
+   {
+      var dataHandlerType = GameTypeResolver.Get( "DataHandler" );
+      if( dataHandlerType == null ) return null;
+
+      return AccessTools.Method( dataHandlerType, "LoadPNG", new[] { typeof( string ), typeof( bool ), typeof( bool ) } )?.Invoke(
+         null,
+         new object[] { "GUICursor01.png", false, false } );
+   }
+
+   private static bool IsMissingTexture( object texture )
+   {
+      if( texture == null ) return true;
+
+      var nameProperty = texture.GetType().GetProperty( "name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic );
+      var textureName = nameProperty?.GetValue( texture, null ) as string;
+      return string.Equals( textureName, "missing.png", StringComparison.OrdinalIgnoreCase );
+   }
+
+   private static void RestoreSystemCursor()
+   {
+      var cursorType = RuntimeTypeResolver.FindLoadedType( "UnityEngine.Cursor" );
+      if( cursorType == null ) return;
+
+      var cursorModeType = RuntimeTypeResolver.FindLoadedType( "UnityEngine.CursorMode" );
+      var setCursorMethod = cursorType.GetMethod(
+         "SetCursor",
+         StaticFlags,
+         null,
+         new[] { typeof( UnityEngine.Texture ), typeof( UnityEngine.Vector2 ), cursorModeType },
+         null );
+      if( setCursorMethod == null ) return;
+
+      var autoCursorMode = cursorModeType != null ? Enum.Parse( cursorModeType, "Auto" ) : null;
+      setCursorMethod.Invoke( null, new object[] { null, new UnityEngine.Vector2( 0f, 0f ), autoCursorMode } );
+   }
+}
+
+[HarmonyPatch]
+internal static class CrewSim_SetCursor_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "CrewSim" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "CrewSim" ), "SetCursor", new[] { typeof( int ) } );
+   }
+
+   private static void Postfix( int nNew )
+   {
+      CursorFallbackHelper.RestoreSystemCursorIfMissing( "CrewSim.SetCursor", CursorFallbackHelper.GetCrewCursorTexture( nNew ) );
+   }
+}
+
+[HarmonyPatch]
+internal static class MainMenu_Start_CursorFallback_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "MainMenu" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "MainMenu" ), "Start", Type.EmptyTypes );
+   }
+
+   private static void Postfix()
+   {
+      CursorFallbackHelper.RestoreSystemCursorIfMissing( "MainMenu.Start", CursorFallbackHelper.LoadMainMenuCursorTexture() );
    }
 }
 
@@ -4122,6 +4660,64 @@ internal static class Ship_LogAdd_Hook
    private static void Prefix( ref string strEntry )
    {
       strEntry = LogMessageRuntimeTranslationHelper.TranslateLogMarkup( strEntry, "Ship.LogAdd" );
+   }
+}
+
+[HarmonyPatch]
+internal static class Ship_LogGetHeader_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ship" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "Ship" ), "LogGetHeader", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __result )
+   {
+      if( __result is not IEnumerable entries ) return;
+
+      var index = 0;
+      foreach( var entry in entries )
+      {
+         var entryProperty = entry == null ? null : RuntimeHookTranslationHelper.GetStringProperty( entry.GetType(), "strEntry" );
+         if( entryProperty?.GetValue( entry ) is not string value || string.IsNullOrWhiteSpace( value ) )
+         {
+            index++;
+            continue;
+         }
+
+         var translated = DiagnosticsRuntimeTranslationHelper.TranslateLogHeaderEntry( value, "Ship.LogGetHeader[" + index + "]" );
+         if( !string.Equals( translated, value, StringComparison.Ordinal ) )
+         {
+            entryProperty.SetValue( entry, translated );
+         }
+
+         index++;
+      }
+   }
+}
+
+[HarmonyPatch]
+internal static class ShipStatus_PrintStatus_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "ShipStatus" ) != null && GameTypeResolver.Get( "CondOwner" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "ShipStatus" ), "PrintStatus", new[] { GameTypeResolver.Get( "CondOwner" ), typeof( string[] ).MakeByRefType() } );
+   }
+
+   private static void Postfix( ref string[] aValues )
+   {
+      DiagnosticsRuntimeTranslationHelper.EnsureShipStatusLabelsTranslated();
+      DiagnosticsRuntimeTranslationHelper.TranslateStatusValues( aValues );
    }
 }
 
@@ -5759,7 +6355,7 @@ internal static class NavModMooringControl_UpdateText_Hook
       var tetherField = __instance == null ? null : RuntimeHookTranslationHelper.GetInstanceField( __instance.GetType(), "goTether" );
       if( tetherField?.GetValue( __instance ) is UnityEngine.GameObject tetherGameObject )
       {
-         RuntimeTextHookHelper.TranslateHierarchyIfChanged( tetherGameObject, "NavModMooringControl.goTether" );
+         MooringRuntimeTranslationHelper.TranslateTetherIfStateChanged( __instance, tetherGameObject );
       }
    }
 }
@@ -8814,5 +9410,351 @@ internal static class Interaction_Triggered_ChargenRiskOutcome_Hook
       if( !ChargenRiskOutcomeHelper.TryOverrideTriggered( __instance, objUs, objThem, ref __result ) ) return true;
 
       return false;
+   }
+}
+
+internal static class MarketRuntimeTranslationHelper
+{
+   private const string MarketRiseColor = "#FF5A5A";
+   private const string MarketDropColor = "#56C271";
+   private static readonly Regex ColorOpenTagRegex = new Regex( @"<color=(?<name>[^>]+)>", RegexOptions.Compiled | RegexOptions.CultureInvariant );
+   private static readonly Regex ColorTagWrapperRegex = new Regex( @"^(?<prefix><color=.*?>)(?<body>.*?)(?<suffix></color>)$", RegexOptions.Compiled | RegexOptions.CultureInvariant );
+   private static readonly Regex SelectCargoPodRegex = new Regex( @"^(?<leading>\s*)(?<left><+\s*)?SELECT CARGOPOD(?<right>\s*>+)?(?<trailing>\s*)$", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase );
+   private static readonly Regex SelectGoodRegex = new Regex( @"^(?<leading>\s*)(?<left><+\s*)?SELECT GOOD(?<right>\s*>+)?(?<trailing>\s*)$", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase );
+   private static readonly Regex VisaDiscountRegex = new Regex( @"^(?<percent>\d+(?:[.,]\d+)?)% Visa Discount: Active$", RegexOptions.Compiled | RegexOptions.CultureInvariant );
+   private static readonly Regex TransferSummaryRegex = new Regex( @"^(?<units>[^ ]+) units for \$(?<price>.+?) total Mass: (?<mass>.+?)kg$", RegexOptions.Compiled | RegexOptions.CultureInvariant );
+
+   public static bool TryTranslateFixedMarketText( string value, out string translatedValue )
+   {
+      translatedValue = value;
+      if( string.IsNullOrWhiteSpace( value ) ) return false;
+
+      var normalized = NormalizeMarketRichTextColorTags( value );
+      if( TryTranslateSelector( normalized, out translatedValue ) )
+      {
+         return true;
+      }
+
+      if( TryTranslateInsufficientFunds( normalized, out translatedValue ) )
+      {
+         return true;
+      }
+
+      if( !string.Equals( normalized, value, StringComparison.Ordinal ) )
+      {
+         translatedValue = normalized;
+         return true;
+      }
+
+      return false;
+   }
+
+   public static string NormalizeMarketRichTextColorTags( string value )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      return ColorOpenTagRegex.Replace( value, match => TryResolveMarketColor( match.Groups[ "name" ].Value, out var colorHex )
+         ? "<color=" + colorHex + ">"
+         : match.Value );
+   }
+
+   public static string TranslateMarketStaticText( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      if( TryTranslateFixedMarketText( value, out var fixedText ) )
+      {
+         return fixedText;
+      }
+
+      var normalized = NormalizeMarketRichTextColorTags( value );
+      var translated = OstranautsTranslatorPlugin.Translate( normalized, hookName );
+      return NormalizeMarketRichTextColorTags( translated );
+   }
+
+   public static string TranslateMarketPriceText( string value )
+   {
+      return NormalizeMarketRichTextColorTags( value );
+   }
+
+   public static string TranslateVisaDiscountText( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var normalized = NormalizeMarketRichTextColorTags( value );
+      var match = VisaDiscountRegex.Match( normalized );
+      if( match.Success )
+      {
+         return match.Groups[ "percent" ].Value + "% 签证折扣：已生效";
+      }
+
+      return TranslateMarketStaticText( normalized, hookName );
+   }
+
+   public static string TranslateTransferText( string value, string hookName )
+   {
+      if( string.IsNullOrWhiteSpace( value ) ) return value;
+
+      var normalized = NormalizeMarketRichTextColorTags( value );
+      if( TryTranslateInsufficientFunds( normalized, out var warning ) )
+      {
+         return warning;
+      }
+
+      var summaryMatch = TransferSummaryRegex.Match( normalized );
+      if( summaryMatch.Success )
+      {
+         return summaryMatch.Groups[ "units" ].Value
+            + " 单位，总价 $"
+            + summaryMatch.Groups[ "price" ].Value
+            + "，总质量："
+            + summaryMatch.Groups[ "mass" ].Value
+            + "kg";
+      }
+
+      return TranslateMarketStaticText( normalized, hookName );
+   }
+
+   private static bool TryTranslateInsufficientFunds( string value, out string translated )
+   {
+      translated = value;
+
+      if( string.Equals( value, "Insufficient funds!", StringComparison.Ordinal ) )
+      {
+         translated = "资金不足！";
+         return true;
+      }
+
+      var colorMatch = ColorTagWrapperRegex.Match( value );
+      if( !colorMatch.Success ) return false;
+
+      var body = colorMatch.Groups[ "body" ].Value;
+      if( !string.Equals( body, "Insufficient funds!", StringComparison.Ordinal )
+         && !string.Equals( body, "资金不足！", StringComparison.Ordinal ) )
+      {
+         return false;
+      }
+
+      translated = "<color=" + MarketRiseColor + ">资金不足！</color>";
+      return true;
+   }
+
+   private static bool TryTranslateSelector( string value, out string translated )
+   {
+      translated = value;
+
+      var cargoPodMatch = SelectCargoPodRegex.Match( value );
+      if( cargoPodMatch.Success )
+      {
+         translated = cargoPodMatch.Groups[ "leading" ].Value
+            + cargoPodMatch.Groups[ "left" ].Value
+            + "选择货舱吊舱"
+            + cargoPodMatch.Groups[ "right" ].Value
+            + cargoPodMatch.Groups[ "trailing" ].Value;
+         return true;
+      }
+
+      var goodMatch = SelectGoodRegex.Match( value );
+      if( goodMatch.Success )
+      {
+         translated = goodMatch.Groups[ "leading" ].Value
+            + goodMatch.Groups[ "left" ].Value
+            + "选择货物"
+            + goodMatch.Groups[ "right" ].Value
+            + goodMatch.Groups[ "trailing" ].Value;
+         return true;
+      }
+
+      return false;
+   }
+
+   private static bool TryResolveMarketColor( string rawColorName, out string colorHex )
+   {
+      var normalizedColorName = NormalizeMarketColorName( rawColorName );
+      switch( normalizedColorName )
+      {
+         case MarketRiseColor:
+         case "red":
+         case "Red":
+         case "RED":
+         case "红色":
+            colorHex = MarketRiseColor;
+            return true;
+         case MarketDropColor:
+         case "green":
+         case "Green":
+         case "GREEN":
+         case "绿色":
+         case "格林":
+            colorHex = MarketDropColor;
+            return true;
+         default:
+            if( ContainsMarketColorToken( normalizedColorName, "red" ) || normalizedColorName.Contains( "红色" ) )
+            {
+               colorHex = MarketRiseColor;
+               return true;
+            }
+
+            if( ContainsMarketColorToken( normalizedColorName, "green" )
+               || normalizedColorName.Contains( "绿色" )
+               || normalizedColorName.Contains( "格林" ) )
+            {
+               colorHex = MarketDropColor;
+               return true;
+            }
+
+            colorHex = string.Empty;
+            return false;
+      }
+   }
+
+   private static string NormalizeMarketColorName( string rawColorName )
+   {
+      return ( rawColorName ?? string.Empty ).Trim().Trim( '\'', '"' ).Replace( " ", string.Empty );
+   }
+
+   private static bool ContainsMarketColorToken( string value, string token )
+   {
+      return !string.IsNullOrEmpty( value )
+         && value.IndexOf( token, StringComparison.OrdinalIgnoreCase ) >= 0;
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIShipMarket_Start_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.ShipGUIs.Market.GUIShipMarket" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "Ostranauts.ShipGUIs.Market.GUIShipMarket" ), "Start", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeTextHookHelper.TranslateHierarchy( RuntimeTextHookHelper.GetGameObject( __instance ), "GUIShipMarket.Start" );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIShipMarketRow_UpdateUI_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.ShipGUIs.Market.GUIShipMarketRow" ) != null
+         && GameTypeResolver.Get( "Ostranauts.ShipGUIs.Market.GUIShipMarketDTO" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "Ostranauts.ShipGUIs.Market.GUIShipMarketRow" ),
+         "UpdateUI",
+         new[] { GameTypeResolver.Get( "Ostranauts.ShipGUIs.Market.GUIShipMarketDTO" ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged(
+         __instance,
+         "txtPrice",
+         value => MarketRuntimeTranslationHelper.TranslateMarketPriceText( value ) );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUISystemMarketColumn_SetData_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.ShipGUIs.Market.GUISystemMarketColumn" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method(
+         GameTypeResolver.Get( "Ostranauts.ShipGUIs.Market.GUISystemMarketColumn" ),
+         "SetData",
+         new[] { typeof( string ), typeof( int ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged(
+         __instance,
+         "txtStationName",
+         value => MarketRuntimeTranslationHelper.TranslateMarketPriceText( value ) );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIStationMarketLower_Show_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.ShipGUIs.Market.GUIStationMarketLower" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "Ostranauts.ShipGUIs.Market.GUIStationMarketLower" ), "Show", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      ApplyTranslations( __instance );
+   }
+
+   private static void ApplyTranslations( object instance )
+   {
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( instance, "txtbtnConfirm", value => MarketRuntimeTranslationHelper.TranslateMarketStaticText( value, "GUIStationMarketLower.txtbtnConfirm" ) );
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( instance, "txtBuy", value => MarketRuntimeTranslationHelper.TranslateMarketStaticText( value, "GUIStationMarketLower.txtBuy" ) );
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( instance, "txtSell", value => MarketRuntimeTranslationHelper.TranslateMarketStaticText( value, "GUIStationMarketLower.txtSell" ) );
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( instance, "txtVisaDiscount", value => MarketRuntimeTranslationHelper.TranslateVisaDiscountText( value, "GUIStationMarketLower.txtVisaDiscount" ) );
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( instance, "txtTransfer", value => MarketRuntimeTranslationHelper.TranslateTransferText( value, "GUIStationMarketLower.txtTransfer" ) );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIStationMarketLower_OnSliderChanged_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.ShipGUIs.Market.GUIStationMarketLower" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "Ostranauts.ShipGUIs.Market.GUIStationMarketLower" ), "OnSliderChanged", new[] { typeof( float ) } );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "txtbtnConfirm", value => MarketRuntimeTranslationHelper.TranslateMarketStaticText( value, "GUIStationMarketLower.OnSliderChanged.txtbtnConfirm" ) );
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "txtBuy", value => MarketRuntimeTranslationHelper.TranslateMarketStaticText( value, "GUIStationMarketLower.OnSliderChanged.txtBuy" ) );
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "txtSell", value => MarketRuntimeTranslationHelper.TranslateMarketStaticText( value, "GUIStationMarketLower.OnSliderChanged.txtSell" ) );
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "txtTransfer", value => MarketRuntimeTranslationHelper.TranslateTransferText( value, "GUIStationMarketLower.OnSliderChanged.txtTransfer" ) );
+   }
+}
+
+[HarmonyPatch]
+internal static class GUIStationMarketLower_ShowPaymentWarning_Hook
+{
+   private static bool Prepare()
+   {
+      return GameTypeResolver.Get( "Ostranauts.ShipGUIs.Market.GUIStationMarketLower" ) != null;
+   }
+
+   private static MethodBase TargetMethod()
+   {
+      return AccessTools.Method( GameTypeResolver.Get( "Ostranauts.ShipGUIs.Market.GUIStationMarketLower" ), "ShowPaymentWarning", Type.EmptyTypes );
+   }
+
+   private static void Postfix( object __instance )
+   {
+      RuntimeHookTranslationHelper.TranslateTextComponentFieldIfChanged( __instance, "txtTransfer", value => MarketRuntimeTranslationHelper.TranslateTransferText( value, "GUIStationMarketLower.ShowPaymentWarning.txtTransfer" ) );
    }
 }

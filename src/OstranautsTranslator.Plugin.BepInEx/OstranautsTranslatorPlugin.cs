@@ -28,6 +28,15 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
    private static readonly IReadOnlyDictionary<string, string> ExactRuntimeTextMap = new Dictionary<string, string>( StringComparer.Ordinal )
    {
       [ "Compartment" ] = "舱室",
+      [ "Buy" ] = "买入",
+      [ "Sell" ] = "卖出",
+      [ "Insufficient funds!" ] = "资金不足！",
+      [ "SELECT CARGOPOD" ] = "选择货舱吊舱",
+      [ "<< SELECT CARGOPOD" ] = "<< 选择货舱吊舱",
+      [ "SELECT CARGOPOD >>" ] = "选择货舱吊舱 >>",
+      [ "SELECT GOOD" ] = "选择货物",
+      [ "<< SELECT GOOD" ] = "<< 选择货物",
+      [ "SELECT GOOD >>" ] = "选择货物 >>",
       [ "Shift" ] = "轮次",
       [ "Shift:" ] = "轮次：",
       [ "班次" ] = "轮次",
@@ -621,7 +630,8 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
       var cursor = 0;
       while( index >= 0 )
       {
-         if( IsWholeAsciiWordMatch( value, index, oldValue.Length ) )
+         if( IsWholeAsciiWordMatch( value, index, oldValue.Length )
+            && !IsInsideRichTextTag( value, index, oldValue.Length ) )
          {
             builder.Append( value, cursor, index - cursor );
             builder.Append( newValue );
@@ -634,6 +644,26 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
       builder.Append( value, cursor, value.Length - cursor );
       return builder.ToString();
    }
+
+     private static bool IsInsideRichTextTag( string value, int index, int length )
+     {
+        if( string.IsNullOrEmpty( value ) || index < 0 || length <= 0 ) return false;
+
+        var lastCharIndex = Math.Min( value.Length - 1, index + length - 1 );
+        return IsInsideRichTextTagBoundary( value, index )
+           || IsInsideRichTextTagBoundary( value, lastCharIndex );
+     }
+
+     private static bool IsInsideRichTextTagBoundary( string value, int index )
+     {
+        if( string.IsNullOrEmpty( value ) || index < 0 || index >= value.Length ) return false;
+
+        var lastOpenIndex = value.LastIndexOf( '<', index );
+        if( lastOpenIndex < 0 ) return false;
+
+        var lastCloseIndex = value.LastIndexOf( '>', index );
+        return lastOpenIndex > lastCloseIndex;
+     }
 
    private static bool IsAsciiWordCandidate( string value )
    {

@@ -28,6 +28,8 @@
     { "raw_text": "You can find links to these resources on the main\nmenu, and in-game through the Options menu.", "seed_translations": { "zh": "你可以在主菜单中找到这些资源的链接，\n也可以在游戏内通过选项菜单访问。" } },
     { "raw_text": "CODE 7451: Target unresponsive.", "seed_translations": { "zh": "代码 7451：目标无响应。" } },
     { "raw_text": "Ready to proceed", "seed_translations": { "zh": "准备继续" } },
+    { "raw_text": "SELECT CARGOPOD", "seed_translations": { "zh": "选择货舱吊舱" } },
+    { "raw_text": "SELECT GOOD", "seed_translations": { "zh": "选择货物" } },
     { "raw_text": "<Configuring Docking Procedure>", "seed_translations": { "zh": "<正在配置对接程序>" } },
     { "raw_text": "Port Azikiwe", "seed_translations": { "zh": "阿齐基韦港" } },
     { "raw_text": "K-Leg: Port Azikiwe", "seed_translations": { "zh": "K-Leg：阿齐基韦港" } },

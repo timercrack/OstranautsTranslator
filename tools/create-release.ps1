@@ -251,6 +251,7 @@ Compatible game version: $gameVersion
 ## Notes
 
 - This release is meant to be extracted directly into the game folder.
+- This release may be updated in place at any time as translations and fixes are added.
 - It includes only the required runtime files, config files, database file, translation mod, and DLLs.
 - It also includes config-example.ini, the bundled glossary generator script, and the workspace/reference glossary JSON files used by the translation workflow.
 - If the game updates and the translation looks outdated, run OstranautsTranslator.exe once, then launch the game again.
@@ -279,6 +280,7 @@ Compatible game version: $gameVersion
 ## 说明
 
 - 这个 release 设计为直接解压到游戏目录使用。
+- 这个 release 会直接在当前版本上持续更新，翻译和修复会随时补充进去。
 - 包里只保留必需的运行时文件、配置文件、数据库文件、翻译 mod 和 DLL。
 - 包内也包含 config-example.ini、术语表生成脚本，以及翻译流程会用到的 workspace/reference 术语 JSON 文件。
 - 如果游戏更新后翻译显得过时，请先运行一次 OstranautsTranslator.exe，再启动游戏。
@@ -311,6 +313,7 @@ Compatible game version: $gameVersion
 ## Notes
 
 - This release is meant to be extracted directly into the game folder.
+- This release may be updated in place at any time as translations and fixes are added.
 - It includes only the required runtime files, config files, database file, translation mod, and DLLs.
 - It also includes config-example.ini, the bundled glossary generator script, and the workspace/reference glossary JSON files used by the translation workflow.
 - If the game updates and the translation looks outdated, run OstranautsTranslator.exe once, then launch the game again.
@@ -341,6 +344,7 @@ Compatible game version: $gameVersion
 ## 说明
 
 - 这个 release 设计为直接解压到游戏目录使用。
+- 这个 release 会直接在当前版本上持续更新，翻译和修复会随时补充进去。
 - 包里只保留必需的运行时文件、配置文件、数据库文件、翻译 mod 和 DLL。
 - 包内也包含 config-example.ini、术语表生成脚本，以及翻译流程会用到的 workspace/reference 术语 JSON 文件。
 - 如果游戏更新后翻译显得过时，请先运行一次 OstranautsTranslator.exe，再启动游戏。
