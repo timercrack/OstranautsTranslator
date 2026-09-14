@@ -11,6 +11,8 @@ public sealed class Harmony
 
    public void PatchAll( Assembly assembly ) => throw new NotImplementedException();
 
+   public void PatchAll( Type type ) => throw new NotImplementedException();
+
    public void UnpatchSelf() => throw new NotImplementedException();
 }
 

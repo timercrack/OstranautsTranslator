@@ -7076,6 +7076,11 @@ internal static class ManualPanelRuntimeTranslationHelper
       translated = ReplaceToken( translated, "New Region: Ceres", "新区域：谷神星" );
       translated = ReplaceToken( translated, "Steam Deck™ & Gamepad Support", "Steam Deck™ 与手柄支持" );
       translated = ReplaceToken( translated, "Performance Improvements & more...", "性能改进及更多内容……" );
+      translated = ReplaceToken( translated, "New Plot and Endgames", "新剧情与结局" );
+      translated = ReplaceToken( translated, "Bounty System", "悬赏系统" );
+      translated = ReplaceToken( translated, "New Station Maps", "新空间站地图" );
+      translated = ReplaceToken( translated, "Workshop Support", "创意工坊支持" );
+      translated = ReplaceToken( translated, "Achievements", "成就" );
       translated = ReplaceToken( translated, "We're active on Discord and other communities,", "我们活跃于 Discord 及其他社区，" );
       translated = ReplaceToken( translated, "where players help us shape the game experience.", "玩家会在那里帮助我们塑造游戏体验。" );
       translated = ReplaceToken( translated, "You can find links to these resources on the main", "你可以在主菜单中找到这些资源的链接，" );
@@ -7811,16 +7816,20 @@ internal static class GUIPDAFerryRow_SetData_Ship_Hook
 {
    private static bool Prepare()
    {
-      return GameTypeResolver.Get( "Ostranauts.ShipGUIs.PDA.GUIPDAFerryRow" ) != null
-         && GameTypeResolver.Get( "Ship" ) != null;
+      return ResolveTargetMethod() != null;
    }
 
    private static MethodBase TargetMethod()
    {
+      return ResolveTargetMethod();
+   }
+
+   private static MethodBase ResolveTargetMethod()
+   {
       return AccessTools.Method(
          GameTypeResolver.Get( "Ostranauts.ShipGUIs.PDA.GUIPDAFerryRow" ),
          "SetData",
-         new[] { GameTypeResolver.Get( "Ship" ), typeof( double ), typeof( Action<string, double> ) } );
+         new[] { GameTypeResolver.Get( "Ship" ), typeof( double ), typeof( Action<string, double, double> ) } );
    }
 
    private static void Postfix( object __instance )

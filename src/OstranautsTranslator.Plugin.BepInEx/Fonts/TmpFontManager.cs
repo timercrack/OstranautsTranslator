@@ -307,27 +307,29 @@ internal static class TmpFontManager
       if( OverrideMaterialCopies.TryGetValue( cacheKey, out var cachedMaterial ) && cachedMaterial != null ) return cachedMaterial;
 
       var copyMaterial = UnityEngine.Object.Instantiate( atlasSourceMaterial );
-      InvokeMaterialMethodIfPresent( copyMaterial, "CopyPropertiesFromMaterial", styleSourceMaterial );
-      CopyTexturePropertyIfPresent( copyMaterial, atlasSourceMaterial, "_MainTex" );
-      CopyTexturePropertyIfPresent( copyMaterial, atlasSourceMaterial, "_FaceTex" );
-      CopyTexturePropertyIfPresent( copyMaterial, atlasSourceMaterial, "_OutlineTex" );
-      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_GradientScale" );
-      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_ScaleRatioA" );
-      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_ScaleRatioB" );
-      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_ScaleRatioC" );
-      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_TextureWidth" );
-      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_TextureHeight" );
-      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_FaceDilate" );
-      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_WeightNormal" );
-      CopyBoldWeightFromNormalIfPresent( copyMaterial, atlasSourceMaterial );
-      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_OutlineWidth" );
-      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_OutlineSoftness" );
-      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_UnderlaySoftness" );
-      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_UnderlayOffsetX" );
-      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_UnderlayOffsetY" );
-      CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_UnderlayDilate" );
-      CopyColorPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_UnderlayColor" );
-      GameObject.DontDestroyOnLoad( copyMaterial );
+      if( copyMaterial == null ) return null;
+
+      TryApplyMaterialOperation( () => InvokeMaterialMethodIfPresent( copyMaterial, "CopyPropertiesFromMaterial", styleSourceMaterial ) );
+      TryApplyMaterialOperation( () => CopyTexturePropertyIfPresent( copyMaterial, atlasSourceMaterial, "_MainTex" ) );
+      TryApplyMaterialOperation( () => CopyTexturePropertyIfPresent( copyMaterial, atlasSourceMaterial, "_FaceTex" ) );
+      TryApplyMaterialOperation( () => CopyTexturePropertyIfPresent( copyMaterial, atlasSourceMaterial, "_OutlineTex" ) );
+      TryApplyMaterialOperation( () => CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_GradientScale" ) );
+      TryApplyMaterialOperation( () => CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_ScaleRatioA" ) );
+      TryApplyMaterialOperation( () => CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_ScaleRatioB" ) );
+      TryApplyMaterialOperation( () => CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_ScaleRatioC" ) );
+      TryApplyMaterialOperation( () => CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_TextureWidth" ) );
+      TryApplyMaterialOperation( () => CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_TextureHeight" ) );
+      TryApplyMaterialOperation( () => CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_FaceDilate" ) );
+      TryApplyMaterialOperation( () => CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_WeightNormal" ) );
+      TryApplyMaterialOperation( () => CopyBoldWeightFromNormalIfPresent( copyMaterial, atlasSourceMaterial ) );
+      TryApplyMaterialOperation( () => CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_OutlineWidth" ) );
+      TryApplyMaterialOperation( () => CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_OutlineSoftness" ) );
+      TryApplyMaterialOperation( () => CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_UnderlaySoftness" ) );
+      TryApplyMaterialOperation( () => CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_UnderlayOffsetX" ) );
+      TryApplyMaterialOperation( () => CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_UnderlayOffsetY" ) );
+      TryApplyMaterialOperation( () => CopyFloatPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_UnderlayDilate" ) );
+      TryApplyMaterialOperation( () => CopyColorPropertyIfPresent( copyMaterial, atlasSourceMaterial, "_UnderlayColor" ) );
+      TryApplyMaterialOperation( () => GameObject.DontDestroyOnLoad( copyMaterial ) );
       OverrideMaterialCopies[ cacheKey ] = copyMaterial;
       return copyMaterial;
    }
@@ -346,15 +348,27 @@ internal static class TmpFontManager
    {
       if( textComponentType == null || textComponent == null || replacementMaterial == null ) return;
 
-      SetMaterialPropertyIfWritable( textComponentType, textComponent, "fontSharedMaterial", replacementMaterial );
-      SetMaterialPropertyIfWritable( textComponentType, textComponent, "fontMaterial", replacementMaterial );
-      ReplaceFirstMaterialInArrayProperty( textComponentType, textComponent, "fontSharedMaterials", replacementMaterial );
-      ReplaceFirstMaterialInArrayProperty( textComponentType, textComponent, "fontMaterials", replacementMaterial );
+      TryApplyMaterialOperation( () => SetMaterialPropertyIfWritable( textComponentType, textComponent, "fontSharedMaterial", replacementMaterial ) );
+      TryApplyMaterialOperation( () => SetMaterialPropertyIfWritable( textComponentType, textComponent, "fontMaterial", replacementMaterial ) );
+      TryApplyMaterialOperation( () => ReplaceFirstMaterialInArrayProperty( textComponentType, textComponent, "fontSharedMaterials", replacementMaterial ) );
+      TryApplyMaterialOperation( () => ReplaceFirstMaterialInArrayProperty( textComponentType, textComponent, "fontMaterials", replacementMaterial ) );
+      TryApplyMaterialOperation( () => InvokeIfPresent( textComponentType, textComponent, "SetSharedMaterial", replacementMaterial ) );
+      TryApplyMaterialOperation( () => InvokeIfPresent( textComponentType, textComponent, "UpdateMeshPadding" ) );
+      TryApplyMaterialOperation( () => InvokeIfPresent( textComponentType, textComponent, "SetMaterialDirty" ) );
+      TryApplyMaterialOperation( () => InvokeIfPresent( textComponentType, textComponent, "SetVerticesDirty" ) );
+   }
 
-      InvokeIfPresent( textComponentType, textComponent, "SetSharedMaterial", replacementMaterial );
-      InvokeIfPresent( textComponentType, textComponent, "UpdateMeshPadding" );
-      InvokeIfPresent( textComponentType, textComponent, "SetMaterialDirty" );
-      InvokeIfPresent( textComponentType, textComponent, "SetVerticesDirty" );
+   private static void TryApplyMaterialOperation( Action operation )
+   {
+      try
+      {
+         operation();
+      }
+      catch
+      {
+         // Unity/TMP versions expose different writable material members. A failed optional
+         // style operation must not disable the actual replacement font or its fallbacks.
+      }
    }
 
    private static void SetMaterialPropertyIfWritable( Type targetType, object target, string propertyName, Material value )

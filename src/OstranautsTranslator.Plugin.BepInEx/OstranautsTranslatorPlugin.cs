@@ -106,7 +106,7 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
 
          Logger.LogInfo( "Installing Harmony patches..." );
          _harmony = new Harmony( PluginData.Identifier );
-         _harmony.PatchAll( typeof( OstranautsTranslatorPlugin ).Assembly );
+         InstallHarmonyPatches();
 
          Logger.LogInfo( "Running initial runtime text scan..." );
          RuntimeTextRescanner.ForceScanAll();
@@ -121,6 +121,27 @@ public sealed class OstranautsTranslatorPlugin : BaseUnityPlugin
       catch( Exception e )
       {
          Logger.LogError( $"An unexpected error occurred during OstranautsTranslator initialization.{Environment.NewLine}{e}" );
+      }
+   }
+
+   private void InstallHarmonyPatches()
+   {
+      var assembly = typeof( OstranautsTranslatorPlugin ).Assembly;
+      foreach( var patchType in assembly.GetTypes() )
+      {
+         if( patchType.GetCustomAttributes( typeof( HarmonyPatch ), false ).Length == 0 )
+         {
+            continue;
+         }
+
+         try
+         {
+            _harmony.PatchAll( patchType );
+         }
+         catch( Exception e )
+         {
+            Logger.LogWarning( $"Skipped Harmony patch '{patchType.FullName}' because its target is unavailable in this game build. {e.Message}" );
+         }
       }
    }
 
