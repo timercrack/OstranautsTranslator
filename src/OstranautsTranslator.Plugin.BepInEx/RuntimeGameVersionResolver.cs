@@ -7,7 +7,7 @@ namespace OstranautsTranslator.Plugin.BepInEx;
 
 internal static class RuntimeGameVersionResolver
 {
-   private const string BuildPrefix = "Early Access Build: ";
+   private const string BuildPrefix = "Release Build: ";
 
    public static bool TryResolveCurrentGameBuild( out GameBuildInfo gameBuildInfo, out string errorMessage )
    {

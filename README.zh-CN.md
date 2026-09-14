@@ -2,7 +2,7 @@
 
 Language / 语言: [English](README.md) | [简体中文](README.zh-CN.md)
 
-OstranautsTranslator 是一个面向 Ostranauts 玩家使用的简体中文翻译包。
+OstranautsTranslator 是面向 Ostranauts 的翻译工具链和玩家发布包。当前发布包默认提供简体中文，同时内置 CLI 和工作流支持生成其他已支持语言的翻译。
 
 它首先是给最终用户准备的：下载 release 压缩包，直接解压到游戏目录，然后启动游戏即可。
 
@@ -11,7 +11,7 @@ OstranautsTranslator 是一个面向 Ostranauts 玩家使用的简体中文翻�
 - 运行所需的 BepInEx DLL 和配置文件
 - doorstop 启动文件
 - OstranautsTranslator 插件
-- 中文 mod 文件
+- 默认语言翻译 mod 文件
 - 这个翻译包必需的数据库和运行时数据文件
 - `config-example.ini`、术语表生成脚本，以及翻译流程会用到的参考术语 JSON 文件
 
@@ -33,7 +33,7 @@ OstranautsTranslator 是一个面向 Ostranauts 玩家使用的简体中文翻�
 
 ## 效果截图
 
-下面是游戏内简体中文翻译效果示例：
+下面是当前默认简体中文玩家发布包的游戏内效果示例：
 
 ### 截图 1
 

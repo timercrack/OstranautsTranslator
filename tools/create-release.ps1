@@ -236,7 +236,7 @@ else {
 @"
 # OstranautsTranslator $Tag
 
-Simplified Chinese package for Ostranauts.
+Translation toolkit and player release package for Ostranauts. The published package defaults to Simplified Chinese, while the bundled CLI and workflow support generating translations for other supported languages.
 
 Compatible game version: $gameVersion
 
@@ -265,7 +265,7 @@ Compatible game version: $gameVersion
 @"
 # OstranautsTranslator $Tag
 
-面向 Ostranauts 玩家使用的简体中文翻译包。
+面向 Ostranauts 的翻译工具链和玩家发布包。当前发布包默认提供简体中文，同时内置 CLI 和工作流支持生成其他已支持语言的翻译。
 
 兼容游戏版本：$gameVersion
 
@@ -298,7 +298,7 @@ Language / 语言: [English](#english) | [简体中文](#zh-cn)
 
 # OstranautsTranslator $Tag
 
-Simplified Chinese package for Ostranauts.
+Translation toolkit and player release package for Ostranauts. The published package defaults to Simplified Chinese, while the bundled CLI and workflow support generating translations for other supported languages.
 
 Compatible game version: $gameVersion
 
@@ -329,7 +329,7 @@ Compatible game version: $gameVersion
 
 # OstranautsTranslator $Tag
 
-面向 Ostranauts 玩家使用的简体中文翻译包。
+面向 Ostranauts 的翻译工具链和玩家发布包。当前发布包默认提供简体中文，同时内置 CLI 和工作流支持生成其他已支持语言的翻译。
 
 兼容游戏版本：$gameVersion
 

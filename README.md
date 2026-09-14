@@ -2,7 +2,7 @@
 
 Language / 语言: [English](README.md) | [简体中文](README.zh-CN.md)
 
-OstranautsTranslator is a Simplified Chinese package for Ostranauts.
+OstranautsTranslator is a translation toolkit and player release package for Ostranauts. The published package defaults to Simplified Chinese, while the bundled CLI and workflow support generating translations for other supported languages.
 
 It is meant for players first: download the release archive, extract it into the game folder, and start the game.
 
@@ -11,7 +11,7 @@ It is meant for players first: download the release archive, extract it into the
 - the required BepInEx runtime DLLs and config files
 - doorstop startup files
 - the OstranautsTranslator plugin files
-- the Chinese mod files
+- the default-language translation mod files
 - the required translation database and runtime data files
 - config-example.ini, the bundled glossary generator script, and the reference glossary JSON files used by the translation workflow
 
@@ -33,7 +33,7 @@ It is meant for players first: download the release archive, extract it into the
 
 ## Screenshots
 
-Examples of the in-game Simplified Chinese translation:
+Examples of the default Simplified Chinese player release:
 
 ### Screenshot 1
 
